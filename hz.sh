@@ -20,6 +20,8 @@ main_menu() {
   cyan "  5) Tailscale / Tailscale “接入”"
   green "  6) Cloudflare Tunnel / Cloudflare Tunnel"
   cyan "  7) msmtp + Brevo (SMTP) / 邮件报警（msmtp + Brevo）"
+  green "  8) WP backup (DB + files) / WordPress 备份（数据库 + 文件）"
+  yellow "  0) Exit / 退出"
   yellow "  0) Exit / 退出"
   echo
 
@@ -49,6 +51,9 @@ main_menu() {
       echo "将调用 msmtp + Brevo 邮件系统安装脚本…"
       curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/mail/setup-msmtp-brevo.sh | bash
       ;;
+    8) echo "正在安装 WordPress 备份脚本..."; \
+     curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/setup-wp-backup-basic.sh | bash
+     ;;
     0)
       echo "再见～"
       exit 0
