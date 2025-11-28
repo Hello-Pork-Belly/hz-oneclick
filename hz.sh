@@ -46,12 +46,13 @@ main_menu() {
     6)
       echo "预留 Cloudflare Tunnel 安装模块（暂未实现）…"
       ;;
-    7)
+    7) 
       echo "将调用 msmtp + Brevo 邮件系统安装脚本…"
-      curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/mail/setup-msmtp-brevo.sh | bash
+      bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/mail/setup-msmtp-brevo.sh | bash)
       ;;
-    8) echo "正在安装 WordPress 备份脚本..."; \
-     curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/setup-wp-backup-basic.sh | bash
+    8) 
+      echo "正在安装 WordPress 备份脚本..."; \
+      bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/setup-wp-backup-basic.sh)
      ;;
     0)
       echo "再见～"
