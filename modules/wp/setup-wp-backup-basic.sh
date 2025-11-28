@@ -3,6 +3,15 @@
 
 set -euo pipefail
 
+# 先初始化变量，避免 set -u 报 “unbound variable”
+SITE=""
+WP_ROOT=""
+DB_NAME=""
+DB_USER=""
+DB_PASS=""
+DB_HOST=""
+BACKUP_DIR=""
+
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "请用 root 运行本脚本（需要写 /usr/local/bin 和 /etc/systemd/system）" >&2
   exit 1
