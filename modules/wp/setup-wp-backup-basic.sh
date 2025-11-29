@@ -1,147 +1,197 @@
 #!/usr/bin/env bash
-# 简单版 WordPress 备份 + systemd 定时器（支持 msmtp 报警）
+#
+# 一键配置 WordPress 备份 + systemd 定时（数据库 + 文件）
+# 注意：本脚本不直接发送邮件，只负责生成备份脚本和定时任务
 
 set -euo pipefail
 
-# 先声明变量，避免 set -u 报 “unbound variable”
+# 提前声明变量，避免 set -u 报错
 SITE=""
 WP_ROOT=""
 DB_NAME=""
 DB_USER=""
 DB_PASS=""
 DB_HOST=""
+BACKUP_BASE=""
 BACKUP_DIR=""
-ALERT_EMAIL=""
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "请用 ROOT 运行本脚本（需要写 /usr/local/bin 和 /etc/systemd/system）" >&2
+  echo "请以 root 身份运行本脚本。"
+  echo "Please run this script as root."
   exit 1
 fi
 
-echo "=== 配置 WordPress 备份脚本（数据库 + 文件） ==="
+echo "============================================================"
+echo " WordPress backup setup (DB + files)"
+echo " WordPress 备份配置向导（数据库 + 文件）"
+echo "============================================================"
 echo
 
-# 1) 站点代号
-read -rp "站点代号（例如 google）: " SITE
-SITE="${SITE:-wpdemo}"
+# ---------- 站点代号 / Site identifier ----------
+read -rp "Site ID (e.g. google) / 站点代号: " SITE
+SITE="${SITE:-wp}"
 
-# 2) WP 根目录
-read -rp "WP 根目录（默认 /var/www/${SITE}/html）: " WP_ROOT
-WP_ROOT="${WP_ROOT:-/var/www/${SITE}/html}"
+# ---------- WP 路径 / WordPress path ----------
+DEFAULT_WP_ROOT="/var/www/${SITE}/html"
+read -rp "WordPress path [${DEFAULT_WP_ROOT}]: " WP_ROOT
+WP_ROOT="${WP_ROOT:-$DEFAULT_WP_ROOT}"
 
-# 3) 数据库信息
-read -rp "数据库名（DB_NAME）: " DB_NAME
-read -rp "数据库用户（DB_USER）: " DB_USER
-read -rp "数据库密码（DB_PASSWORD）: " DB_PASS
-read -rp "数据库主机和端口（DB_HOST，默认 127.0.0.1:3306）: " DB_HOST
+if [[ ! -d "${WP_ROOT}" ]]; then
+  echo "❌ 找不到目录：${WP_ROOT}"
+  echo "Directory not found: ${WP_ROOT}"
+  exit 1
+fi
+
+# ---------- DB 信息 ----------
+echo
+echo "Database settings / 数据库设置："
+
+read -rp "DB name (DB_NAME): " DB_NAME
+read -rp "DB user (DB_USER): " DB_USER
+read -rp "DB password (DB_PASSWORD): " DB_PASS
+
+read -rp "DB host [127.0.0.1:3306] (DB_HOST): " DB_HOST
 DB_HOST="${DB_HOST:-127.0.0.1:3306}"
 
-# 4) 备份根目录
-read -rp "备份根目录（默认 /root/backups/${SITE}）: " BACKUP_DIR
-BACKUP_DIR="${BACKUP_DIR:-/root/backups/${SITE}}"
-
-# 5) 报警收件邮箱（可选）
-read -rp "报警收件邮箱（留空则不发邮件）: " ALERT_EMAIL
-ALERT_EMAIL="${ALERT_EMAIL:-}"
-
-echo
-echo "站点代号:          ${SITE}"
-echo "WordPress 根目录:  ${WP_ROOT}"
-echo "数据库名:          ${DB_NAME}"
-echo "数据库用户:        ${DB_USER}"
-echo "数据库主机:        ${DB_HOST}"
-echo "备份根目录:        ${BACKUP_DIR}"
-echo "报警收件邮箱:      ${ALERT_EMAIL:-<不发送>}"
-echo
-
-read -rp "请确认以上信息是否正确？(y/N): " CONFIRM
-CONFIRM="${CONFIRM:-n}"
-if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  echo "已取消。"
-  exit 1
-fi
-
-mkdir -p "${BACKUP_DIR}"
-
-# 拆分 DB_HOST
-DB_HOST_ONLY="${DB_HOST%%:*}"
+# 拆分 host:port
+DB_HOST_ONLY="${DB_HOST%:*}"
 DB_PORT_ONLY="${DB_HOST##*:}"
 
-# 将变量做 shell 安全转义，写进备份脚本
-SITE_ESCAPED=$(printf '%q' "${SITE}")
-WP_ROOT_ESCAPED=$(printf '%q' "${WP_ROOT}")
-DB_NAME_ESCAPED=$(printf '%q' "${DB_NAME}")
-DB_USER_ESCAPED=$(printf '%q' "${DB_USER}")
-DB_PASS_ESCAPED=$(printf '%q' "${DB_PASS}")
-DB_HOST_ONLY_ESCAPED=$(printf '%q' "${DB_HOST_ONLY}")
-DB_PORT_ONLY_ESCAPED=$(printf '%q' "${DB_PORT_ONLY}")
-BACKUP_DIR_ESCAPED=$(printf '%q' "${BACKUP_DIR}")
-ALERT_EMAIL_ESCAPED=$(printf '%q' "${ALERT_EMAIL}")
+# ============================================================
+#  检查 rclone 挂载 / Check rclone mounts
+# ============================================================
+
+echo
+echo "Checking for rclone mounts..."
+echo "正在检查是否存在 rclone 挂载的网盘..."
+
+mapfile -t RCLONE_MOUNTS < <(findmnt -rn -t fuse.rclone -o TARGET 2>/dev/null || true)
+
+if ((${#RCLONE_MOUNTS[@]} == 0)); then
+  echo
+  echo "⚠ No rclone mounts detected."
+  echo "⚠ 未检测到 rclone 挂载的网盘。"
+  echo "  建议先通过主菜单选项 2 安装 rclone 并挂载 OneDrive / Google Drive 等网盘。"
+  echo
+
+  read -rp "Return to main menu now? [y/N] / 是否先返回主菜单？[y/N]: " back_choice
+  case "${back_choice}" in
+    y|Y)
+      echo "返回主菜单 / Returning to main menu..."
+      exit 0
+      ;;
+    *)
+      echo "继续使用本机目录进行备份。"
+      echo "Continue with local directory for backup."
+      BACKUP_BASE="/root/backups/${SITE}"
+      ;;
+  esac
+else
+  echo
+  echo "Detected rclone mounts / 检测到以下 rclone 挂载点："
+  idx=1
+  for m in "${RCLONE_MOUNTS[@]}"; do
+    echo "  ${idx}) ${m}"
+    ((idx++))
+  done
+  echo "  0) Use local directory / 使用本机目录 (/root/backups/${SITE})"
+  echo
+
+  read -rp "Select backup base (number) / 请选择备份根目录编号: " sel
+  if [[ "${sel}" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= ${#RCLONE_MOUNTS[@]} )); then
+    BACKUP_BASE="${RCLONE_MOUNTS[sel-1]}"
+    echo "Using mounted path as backup base: ${BACKUP_BASE}"
+    echo "将使用挂载路径作为备份根目录：${BACKUP_BASE}"
+  else
+    BACKUP_BASE="/root/backups/${SITE}"
+    echo "Using local directory as backup base: ${BACKUP_BASE}"
+    echo "将使用本机目录作为备份根目录：${BACKUP_BASE}"
+  fi
+fi
+
+# ---------- 最终备份目录 ----------
+DEFAULT_BACKUP_DIR="${BACKUP_BASE%/}/wp-backups/${SITE}"
+echo
+read -rp "Backup dir [${DEFAULT_BACKUP_DIR}]: " BACKUP_DIR
+BACKUP_DIR="${BACKUP_DIR:-$DEFAULT_BACKUP_DIR}"
+
+mkdir -p "${BACKUP_DIR}/db" "${BACKUP_DIR}/files"
+
+echo
+echo "Backup directory will be: ${BACKUP_DIR}"
+echo "备份将保存到：${BACKUP_DIR}"
+echo
+
+# ============================================================
+#  生成备份脚本 / Generate backup script
+# ============================================================
 
 BACKUP_SCRIPT="/usr/local/bin/wp-backup-${SITE}.sh"
 
 cat >"${BACKUP_SCRIPT}" <<EOF
 #!/usr/bin/env bash
+# Auto generated WordPress backup script for site: ${SITE}
 # 自动生成的 WordPress 备份脚本（站点：${SITE}）
 
 set -euo pipefail
 
-SITE=${SITE_ESCAPED}
-WP_ROOT=${WP_ROOT_ESCAPED}
-DB_NAME=${DB_NAME_ESCAPED}
-DB_USER=${DB_USER_ESCAPED}
-DB_PASS=${DB_PASS_ESCAPED}
-DB_HOST_ONLY=${DB_HOST_ONLY_ESCAPED}
-DB_PORT_ONLY=${DB_PORT_ONLY_ESCAPED}
-BACKUP_DIR=${BACKUP_DIR_ESCAPED}
-ALERT_EMAIL=${ALERT_EMAIL_ESCAPED}
+SITE="${SITE}"
+WP_ROOT="${WP_ROOT}"
+DB_NAME="${DB_NAME}"
+DB_USER="${DB_USER}"
+DB_PASS="${DB_PASS}"
+DB_HOST_ONLY="${DB_HOST_ONLY}"
+DB_PORT_ONLY="${DB_PORT_ONLY}"
+BACKUP_DIR="${BACKUP_DIR}"
 
-DATE="\$(date +%F-%H%M%S)"
-TODAY_DIR="\${BACKUP_DIR}/\${DATE}"
+DATE=\$(date +"%Y%m%d-%H%M%S")
 
-mkdir -p "\${TODAY_DIR}"
+LOG_DIR="\${BACKUP_DIR}/logs"
+mkdir -p "\${LOG_DIR}"
+LOG_FILE="\${LOG_DIR}/backup-\${DATE}.log"
 
-DB_DUMP_FILE="\${TODAY_DIR}/\${SITE}-db-\${DATE}.sql"
-DB_DUMP_GZ="\${DB_DUMP_FILE}.gz"
-FILES_TAR="\${TODAY_DIR}/\${SITE}-files-\${DATE}.tar.gz"
+{
+  echo "=== WordPress backup started (\${DATE}) ==="
+  echo "Site: \${SITE}"
+  echo "WP_ROOT: \${WP_ROOT}"
+  echo "DB: \${DB_USER}@\${DB_HOST_ONLY}:\${DB_PORT_ONLY}/\${DB_NAME}"
+  echo "Backup dir: \${BACKUP_DIR}"
+  echo
 
-echo "[\${DATE}] 开始备份站点 \${SITE}..."
+  mkdir -p "\${BACKUP_DIR}/db" "\${BACKUP_DIR}/files"
 
-# 1) 备份数据库
-echo "  - 导出数据库 \${DB_NAME} ..."
-mysqldump -h "\${DB_HOST_ONLY}" -P "\${DB_PORT_ONLY}" \\
-  -u "\${DB_USER}" -p"\${DB_PASS}" "\${DB_NAME}" > "\${DB_DUMP_FILE}"
+  # DB backup
+  DB_FILE="\${BACKUP_DIR}/db/\${SITE}-db-\${DATE}.sql.gz"
+  echo "[DB] Dumping MySQL/MariaDB to \${DB_FILE} ..."
+  mysqldump -h "\${DB_HOST_ONLY}" -P "\${DB_PORT_ONLY}" -u "\${DB_USER}" -p"\${DB_PASS}" "\${DB_NAME}" | gzip -c > "\${DB_FILE}"
+  echo "[DB] Done."
 
-gzip "\${DB_DUMP_FILE}"
+  # Files backup
+  FILES_FILE="\${BACKUP_DIR}/files/\${SITE}-files-\${DATE}.tar.gz"
+  echo "[Files] Archiving WordPress files to \${FILES_FILE} ..."
+  tar -czf "\${FILES_FILE}" -C "\${WP_ROOT}" .
+  echo "[Files] Done."
 
-# 2) 备份 WP 文件
-echo "  - 打包 WordPress 文件 ..."
-tar -czf "\${FILES_TAR}" -C "\${WP_ROOT}" .
+  echo
+  echo "All done."
+  echo "=== WordPress backup finished (\$(date +"%Y%m%d-%H%M%S")) ==="
 
-# 3) 清理旧备份（保留 14 天）
-KEEP_DAYS=14
-find "\${BACKUP_DIR}" -maxdepth 1 -mindepth 1 -type d -mtime +\${KEEP_DAYS} -exec rm -rf {} \; || true
+} | tee "\${LOG_FILE}"
 
-echo "[\${DATE}] 站点 \${SITE} 备份完成。"
-echo "  - 数据库备份: \${DB_DUMP_GZ}"
-echo "  - 文件备份:   \${FILES_TAR}"
-
-# 4) 可选：发送邮件通知（需要系统已配置 msmtp）
-if [[ -n "\${ALERT_EMAIL}" ]] && command -v msmtp >/dev/null 2>&1; then
-  MSG="这是来自 \${SITE} 的 WordPress 备份通知。\\n\\n时间：\${DATE}\\n数据库备份：\${DB_DUMP_GZ}\\n文件备份：\${FILES_TAR}"
-  printf "%b\\n" "\${MSG}" | msmtp "\${ALERT_EMAIL}" || true
-fi
 EOF
 
-chmod 700 "${BACKUP_SCRIPT}"
+chmod +x "${BACKUP_SCRIPT}"
+
+# ============================================================
+#  systemd service + timer
+# ============================================================
 
 SERVICE_FILE="/etc/systemd/system/wp-backup-${SITE}.service"
 TIMER_FILE="/etc/systemd/system/wp-backup-${SITE}.timer"
 
 cat >"${SERVICE_FILE}" <<EOF
 [Unit]
-Description=WordPress backup for ${SITE}
-After=network.target
+Description=WordPress backup for site ${SITE}
 
 [Service]
 Type=oneshot
@@ -150,11 +200,11 @@ EOF
 
 cat >"${TIMER_FILE}" <<EOF
 [Unit]
-Description=Daily WordPress backup timer for ${SITE}
+Description=Daily WordPress backup for site ${SITE}
 
 [Timer]
-OnCalendar=*-*-* 03:15:00
-Unit=wp-backup-${SITE}.service
+OnCalendar=*-*-* 02:30:00
+Persistent=true
 
 [Install]
 WantedBy=timers.target
@@ -164,9 +214,19 @@ systemctl daemon-reload
 systemctl enable --now "wp-backup-${SITE}.timer"
 
 echo
-echo "已生成备份脚本：${BACKUP_SCRIPT}"
-echo "已创建并启用 systemd 定时任务：wp-backup-${SITE}.timer"
+echo "============================================================"
+echo "Setup finished."
+echo "配置完成。"
 echo
-echo "可以用以下命令查看："
-echo "  systemctl list-timers | grep wp-backup-${SITE}"
-echo "  journalctl -u wp-backup-${SITE}.service --no-pager"
+echo "Backup script  : ${BACKUP_SCRIPT}"
+echo "Service unit   : ${SERVICE_FILE}"
+echo "Timer unit     : ${TIMER_FILE}"
+echo
+echo "Timer status   :"
+systemctl status "wp-backup-${SITE}.timer" --no-pager || true
+
+echo
+echo "下一步建议 / Next suggestions:"
+echo "  1) 使用菜单 2 确保 rclone 已正确挂载网盘（如有需要）。"
+echo "  2) 使用菜单 7 安装 msmtp + 邮件报警（可选，仅在出错时发邮件，留待后续步骤实现）。"
+echo
