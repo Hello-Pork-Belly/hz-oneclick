@@ -17,9 +17,10 @@ choose_lang() {
     echo "Please select language / 请选择语言："
     echo "  1) English"
     echo "  2) 简体中文"
+    echo "  e) Exit / 退出"
     echo
 
-    read -rp "Enter a number and press Enter / 请输入编号并回车: " lang_choice
+    read -rp "Enter a choice and press Enter / 请输入选项并按回车: " lang_choice
 
     case "$lang_choice" in
       1)
@@ -29,6 +30,10 @@ choose_lang() {
       2)
         HZ_LANG="zh"
         break
+        ;;
+      e|E|0)
+        echo "Bye~ / 再见～"
+        exit 0
         ;;
       *)
         echo "Invalid choice / 无效选项，请重新输入..."
@@ -57,8 +62,9 @@ main_menu() {
       cyan  "  7) msmtp + Brevo (SMTP alert)"
       green "  8) WP backup (DB + files)"
       yellow "  0) Exit"
+      yellow "  r) Return to language selection / 返回语言选择 "
       echo
-      read -rp "Please enter a number and press Enter: " choice
+      read -rp "Please enter a choice and press Enter: " choice
 
       case "$choice" in
         1)
@@ -100,6 +106,10 @@ main_menu() {
           echo "Bye~"
           exit 0
           ;;
+        r|R)
+          # 回到语言选择
+          choose_lang
+          ;;
         *)
           echo "Invalid choice, please try again."
           read -rp "Press Enter to continue..." _
@@ -121,8 +131,9 @@ main_menu() {
       cyan  "  7) 邮件报警（msmtp + Brevo）"
       green "  8) WordPress 备份（数据库 + 文件）"
       yellow "  0) 退出"
+      yellow "  r) 返回语言选择 / Return to language selection"
       echo
-      read -rp "请输入编号并按回车: " choice
+      read -rp "请输入选项并按回车: " choice
 
       case "$choice" in
         1)
@@ -163,6 +174,10 @@ main_menu() {
         0)
           echo "再见～"
           exit 0
+          ;;
+        r|R)
+          # 回到语言选择
+          choose_lang
           ;;
         *)
           echo "无效选项，请重新输入。"
