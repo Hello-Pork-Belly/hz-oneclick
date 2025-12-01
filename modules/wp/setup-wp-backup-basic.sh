@@ -184,7 +184,7 @@ echo
 echo "[6/7] 每日备份时间 / Daily backup time"
 echo "注意：这是“服务器时间”，大多数 VPS 上为 UTC。"
 echo "例如："
-echo "  填 03:30 → 每天 03:30 (UTC) 运行；在新西兰会看到对应本地下午/凌晨时间。"
+echo "  填 03:30 → 每天 03:30 (UTC) 运行。"
 read -rp "每日备份时间 (HH:MM，24 小时制) [03:30] : " BACKUP_TIME
 BACKUP_TIME="${BACKUP_TIME:-03:30}"
 
