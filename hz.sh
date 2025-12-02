@@ -136,6 +136,7 @@ main_menu() {
       cyan  "  7) 邮件报警（msmtp + Brevo）"
       green "  8) WordPress 备份（数据库 + 文件）"
       cyan  "  9) wp-cron 定时任务向导"
+      green "  10) rkhunter（系统后门 / 木马检测）"
       yellow "  0) 退出"
       yellow "  r) 返回语言选择 / Return to language selection"
       echo
@@ -180,6 +181,10 @@ main_menu() {
         9)
           echo "将运行 wp-cron 定时任务向导..."
           bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/gen-wp-cron.sh)
+          ;;
+        10)
+          echo "将安装 / 初始化 rkhunter（系统后门 / 木马检测）..."
+          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/install-rkhunter.sh)
           ;;
         0)
           echo "再见～"
