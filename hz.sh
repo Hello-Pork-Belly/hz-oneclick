@@ -62,6 +62,8 @@ main_menu() {
       cyan  "  7) msmtp + Brevo (SMTP alert)"
       green "  8) WP backup (DB + files)"
       cyan  "  9) wp-cron helper (system cron for WordPress)"
+      green  " 10) rkhunter (rootkit / trojan scanner)"
+      cyan  "  11) rkhunter (daily check / optional mail alert)"
       yellow "  0) Exit"
       green "  r) Return to language selection / 返回语言选择 "
       echo
@@ -106,6 +108,14 @@ main_menu() {
         9)
           echo "Running wp-cron helper (system cron for WordPress)..."
           bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/gen-wp-cron-en.sh)
+          ;;
+        10)
+          echo "Installing rkhunter (rootkit / trojan scanner) ..."
+          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/install-rkhunter-en.sh)
+          ;;
+        11)
+          echo "rkhunter (setting / optional mail alert)) ..."
+          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/setup-rkhunter-cron-en.sh)
           ;;
         0)
           echo "Bye~"
