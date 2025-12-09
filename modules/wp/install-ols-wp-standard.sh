@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # install-ols-wp-standard.sh
-# v0.10 - OLS + WordPress 标准安装（HTTP 版，带环境自检 / 自动调优 / 清理工具）
+# v0.11 - OLS + WordPress 标准安装（HTTP 版，带环境自检 / 自动调优 / 清理工具）
 # 2025-12-09
 #
-# 变更摘要（相对于前几版）：
+# 变更摘要：
 # - 新增：环境自检（系统 / 端口 / 防火墙），打印排错提示，减少 521 类问题
 # - 新增：根据本机内存自动写入 WP_MEMORY_LIMIT / WP_MAX_MEMORY_LIMIT
 # - 新增：自动删除 Hello Dolly / Akismet，只保留最新默认主题 + GeneratePress
-# - 修复：数据库密码不再使用占位符替换，改为直接写入 + 双重输入校验 + 连接测试
+# - 修复：数据库密码不再用占位符替换，改为双重输入校验 + mysql 连接测试
 # - 修复：打印公网 IPv4 / IPv6，不再误用 10.x 内网地址
-# - 优化：清理 OLS / WordPress 子菜单执行后，会显示“已完成”并停留在子菜单中
+# - 修复：GeneratePress 下载 / 解压失败时不再导致脚本退出，缺 unzip 自动安装，失败仅 WARN
 
 set -Eeuo pipefail
 
 SCRIPT_NAME="install-ols-wp-standard.sh"
-SCRIPT_VERSION="v0.10"
+SCRIPT_VERSION="v0.11"
 
 GREEN="\033[32m"
 YELLOW="\033[33m"
@@ -78,7 +78,9 @@ command_exists() {
 detect_public_ipv4() {
   local ip=""
   if command_exists curl; then
-    ip=$(curl -4 -fsS https://api.ipify.org 2>/dev/null || curl -4 -fsS https://ipv4.icanhazip.com 2>/dev/null || true)
+    ip=$(curl -4 -fsS https://api.ipify.org 2>/dev/null \
+         || curl -4 -fsS https://ipv4.icanhazip.com 2>/dev/null \
+         || true)
   fi
   echo "$ip"
 }
@@ -86,7 +88,9 @@ detect_public_ipv4() {
 detect_public_ipv6() {
   local ip=""
   if command_exists curl; then
-    ip=$(curl -6 -fsS https://api64.ipify.org 2>/dev/null || curl -6 -fsS https://ipv6.icanhazip.com 2>/dev/null || true)
+    ip=$(curl -6 -fsS https://api64.ipify.org 2>/dev/null \
+         || curl -6 -fsS https://ipv6.icanhazip.com 2>/dev/null \
+         || true)
   fi
   echo "$ip"
 }
@@ -109,7 +113,7 @@ env_check_summary() {
   echo "   - 内存约   : ${mem_gb} GB"
   echo "   - 根分区   : 总计 ${disk_total} / 可用 ${disk_avail}"
   if (( mem_gb < 4 )); then
-    log_warn "当前机器内存 < 4G，建议【只跑 OLS + WordPress 前端】，数据库 / Redis 放到其他高配机器。"
+    log_warn "当前机器内存 < 4G，建议【只跑 OLS + WordPress 前端】，DB / Redis 放到其他高配机器。"
   fi
   echo
 
@@ -126,12 +130,11 @@ env_check_summary() {
     ufw status verbose || true
     log_note "如果 ufw 已启用，请确认 80/tcp 和 443/tcp 已允许。"
   else
-    log_note "未检测到 ufw（这不一定是问题，可能用的是其他防火墙或云厂商安全组）。"
+    log_note "未检测到 ufw（也可能用的是别的防火墙或只靠云厂商安全组）。"
   fi
   echo
 
-  log_note "⚠️ 重要：如果是 Oracle / 其他云厂商，还必须在控制台安全组或安全列表中放行 80 和 443。"
-  log_note "        否则 Cloudflare 前面显示正常，后台机器还是会出现 521 类错误。"
+  log_note "⚠️ 重要：云厂商（例如 Oracle）安全列表里也要放行 80/443，否则前面 Cloudflare 绿灯，后面依然 521。"
   echo
 }
 
@@ -141,7 +144,7 @@ install_ols_if_needed() {
   header_step 2 4 "安装 / 检查 OpenLiteSpeed"
 
   if command_exists lswsctrl || [[ -x /usr/local/lsws/bin/lswsctrl ]]; then
-    log_info "检测到已安装 OpenLiteSpeed，将跳过安装步骤，仅做基础检查。"
+    log_info "检测到已安装 OpenLiteSpeed，跳过安装，仅检查服务。"
   else
     log_info "未检测到 OpenLiteSpeed，准备安装（Ubuntu 22.04/24.04）。"
 
@@ -150,7 +153,6 @@ install_ols_if_needed() {
       apt-get install -y wget
     fi
 
-    # 官方仓库安装
     wget -O - https://repo.litespeed.sh | bash
     apt-get install -y openlitespeed lsphp83 lsphp83-mysql lsphp83-common
 
@@ -160,14 +162,24 @@ install_ols_if_needed() {
   systemctl enable --now lsws || systemctl enable --now openlitespeed || true
 
   if ! systemctl is-active --quiet lsws && ! systemctl is-active --quiet openlitespeed; then
-    log_error "OpenLiteSpeed 服务未能启动，请手动检查后再重试。"
+    log_error "OpenLiteSpeed 服务未能启动，请手动检查。"
     exit 1
   fi
 
   log_info "OpenLiteSpeed 服务运行中。"
 }
 
-# ---------------- 收集站点信息 ----------------
+# ---------------- 收集站点 / DB 信息 ----------------
+
+SITE_SLUG=""
+SITE_DOMAIN=""
+SITE_DOCROOT=""
+SITE_LOGROOT=""
+DB_HOST=""
+DB_PORT=""
+DB_NAME=""
+DB_USER=""
+DB_PASSWORD=""
 
 collect_site_info() {
   header_step 3 4 "收集站点基本信息"
@@ -175,7 +187,7 @@ collect_site_info() {
   read -rp "请输入站点 slug（例如 ols-test，用于目录名和 vhost 名称）： " SITE_SLUG
   SITE_SLUG="${SITE_SLUG:-ols-site}"
 
-  read -rp "请输入主域名（例如 ols.example.com，暂时可先写测试域名）： " SITE_DOMAIN
+  read -rp "请输入主域名（例如 ols.example.com，可先用测试域名）： " SITE_DOMAIN
   SITE_DOMAIN="${SITE_DOMAIN:-ols.example.com}"
 
   SITE_DOCROOT="/var/www/${SITE_SLUG}/html"
@@ -185,33 +197,31 @@ collect_site_info() {
   log_info "站点访问日志目录：${SITE_LOGROOT}"
 }
 
-# ---------------- 收集数据库信息 ----------------
-
 collect_db_info() {
   header_step 4 4 "收集数据库连接信息（必须是已存在的 DB / 用户）"
 
   log_note "说明：本模块【不自动创建数据库和用户】，请先在 DB 机器上建好："
   log_note "      - 数据库名（例如 ${SITE_SLUG}_wp）"
-  log_note "      - 专用用户（例如 ${SITE_SLUG}_user，并授予本库全部权限）"
+  log_note "      - 专用 DB 用户（例如 ${SITE_SLUG}_user，并授予此库全部权限）"
   echo
 
-  read -rp "请输入数据库 Host（可以是 IP / 域名 / Tailscale IP，默认 127.0.0.1）: " DB_HOST
+  read -rp "请输入数据库 Host（IP / 域名 / Tailscale IP，默认 127.0.0.1）: " DB_HOST
   DB_HOST="${DB_HOST:-127.0.0.1}"
 
   read -rp "请输入数据库 Port（默认 3306）: " DB_PORT
   DB_PORT="${DB_PORT:-3306}"
 
-  read -rp "请输入数据库名（必须已经存在，例如 ${SITE_SLUG}_wp）: " DB_NAME
+  read -rp "请输入数据库名（必须与已创建的数据库名称完全一致，例如 ${SITE_SLUG}_wp）: " DB_NAME
   DB_NAME="${DB_NAME:-${SITE_SLUG}_wp}"
 
-  read -rp "请输入数据库用户名（必须已经存在，例如 ${SITE_SLUG}_user）: " DB_USER
+  read -rp "请输入数据库用户名（必须与已创建的用户完全一致，例如 ${SITE_SLUG}_user）: " DB_USER
   DB_USER="${DB_USER:-${SITE_SLUG}_user}"
 
   while true; do
-    read -rsp "请输入数据库密码（不会回显，避免使用单引号 ' ）: " DB_PASSWORD
+    read -rsp "请输入数据库密码（不会回显，建议用密码管理器保存，禁止包含单引号 ' ）: " DB_PASSWORD
     echo
     if [[ "$DB_PASSWORD" == *"'"* ]]; then
-      log_warn "密码中不能包含单引号 '  ，请重新输入。"
+      log_warn "密码中不能包含单引号 ' ，请重新输入。"
       continue
     fi
     read -rsp "请再输入一次数据库密码以确认: " DB_PASSWORD2
@@ -235,7 +245,7 @@ collect_db_info() {
      -e "SELECT 1;" >/dev/null 2>&1; then
     log_info "数据库连接测试成功。"
   else
-    log_error "数据库连接失败，请检查 Host/Port/DB 名 / 用户和密码是否正确。"
+    log_error "数据库连接失败，请检查 Host / Port / DB 名 / 用户 / 密码是否正确。"
     confirm_or_exit || exit 1
   fi
 }
@@ -247,7 +257,6 @@ prepare_docroot() {
 
   mkdir -p "${SITE_DOCROOT}" "${SITE_LOGROOT}"
 
-  # 建议使用 nobody:nogroup（与 OLS 默认一致），如与你当前环境不符可后续自行调整
   chown -R nobody:nogroup "/var/www/${SITE_SLUG}"
   find "/var/www/${SITE_SLUG}" -type d -exec chmod 755 {} \;
   find "/var/www/${SITE_SLUG}" -type f -exec chmod 644 {} \;
@@ -283,13 +292,13 @@ generate_wp_config() {
     log_warn "检测到已存在 wp-config.php，将覆盖其中的 DB 配置相关部分。"
   fi
 
-  # 生成随机盐
   local salts
   salts=$(curl -fsS https://api.wordpress.org/secret-key/1.1/salt/ || true)
   if [[ -z "${salts}" ]]; then
-    log_warn "获取官方 SALT 失败，将使用本地简单随机字符串。"
-    salts=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64)
-    salts=$(printf "define('AUTH_KEY', '%s');\n" "$salts")
+    log_warn "获取官方 SALT 失败，将使用本地随机字符串。"
+    local tmp_salt
+    tmp_salt=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64)
+    salts=$(printf "define('AUTH_KEY', '%s');\n" "$tmp_salt")
   fi
 
   cat > "${wp_config}" <<EOF
@@ -306,7 +315,7 @@ define( 'DB_COLLATE', '' );
 ${salts}
 
 /**
- * 表前缀：如需多个站点共享 DB，可自行修改。
+ * 表前缀：如需多个站点共享 DB，可修改。
  */
 \$table_prefix = 'wp_';
 
@@ -316,8 +325,6 @@ ${salts}
 define( 'DISABLE_WP_CRON', true );
 
 /* 自动调优部分将在稍后由脚本写入（WP_MEMORY_LIMIT 等）。 */
-
-/* That's all, stop editing! Happy publishing. */
 
 if ( ! defined( 'ABSPATH' ) ) {
   define( 'ABSPATH', __DIR__ . '/' );
@@ -344,23 +351,24 @@ auto_tune_wp_config() {
   if (( mem_gb < 4 )); then
     wp_mem="96M"
     wp_max="192M"
-    log_note "检测到内存 < 4G：WP_MEMORY_LIMIT 将设置为 ${wp_mem}，WP_MAX_MEMORY_LIMIT 为 ${wp_max}。"
+    log_note "内存 < 4G：WP_MEMORY_LIMIT=${wp_mem}，WP_MAX_MEMORY_LIMIT=${wp_max}。"
   elif (( mem_gb < 8 )); then
     wp_mem="128M"
     wp_max="256M"
-    log_note "检测到内存约 ${mem_gb}G：WP_MEMORY_LIMIT 将设置为 ${wp_mem}，WP_MAX_MEMORY_LIMIT 为 ${wp_max}。"
+    log_note "内存约 ${mem_gb}G：WP_MEMORY_LIMIT=${wp_mem}，WP_MAX_MEMORY_LIMIT=${wp_max}。"
   else
     wp_mem="196M"
     wp_max="384M"
-    log_note "检测到内存 ≥ 8G：WP_MEMORY_LIMIT 将设置为 ${wp_mem}，WP_MAX_MEMORY_LIMIT 为 ${wp_max}。"
+    log_note "内存 ≥ 8G：WP_MEMORY_LIMIT=${wp_mem}，WP_MAX_MEMORY_LIMIT=${wp_max}。"
   fi
 
-  # 在 “That's all, stop editing!” 前插入
   awk -v wp_mem="$wp_mem" -v wp_max="$wp_max" '
-    /That'"'"'s all, stop editing!/ {
+    /require_once ABSPATH . '\''wp-settings.php'\'';/ {
       print "define( '\''WP_MEMORY_LIMIT'\'', '\''"wp_mem"'\'' );"
       print "define( '\''WP_MAX_MEMORY_LIMIT'\'', '\''"wp_max"'\'' );"
       print ""
+      print $0
+      next
     }
     { print }
   ' "$wp_config" > "${wp_config}.tmp" && mv "${wp_config}.tmp" "$wp_config"
@@ -373,16 +381,37 @@ post_install_cleanup() {
   rm -rf "${SITE_DOCROOT}/wp-content/plugins/hello.php" \
          "${SITE_DOCROOT}/wp-content/plugins/akismet" || true
 
-  # 安装 GeneratePress 主题（简单方式：从 WordPress.org 下载）
+  # 安装 GeneratePress 主题（失败只 WARN，不中断脚本）
   local gp_ver="3.6.1"
   local gp_zip="/tmp/generatepress-${gp_ver}.zip"
+
   if [[ ! -d "${SITE_DOCROOT}/wp-content/themes/generatepress" ]]; then
-    log_info "尝试下载 GeneratePress ${gp_ver} 主题..."
-    if curl -fsSL -o "${gp_zip}" "https://downloads.wordpress.org/theme/generatepress.${gp_ver}.zip"; then
-      unzip -q "${gp_zip}" -d "${SITE_DOCROOT}/wp-content/themes"
-      log_info "GeneratePress 主题已解压。"
+    log_info "尝试自动安装 GeneratePress ${gp_ver} 主题（失败将跳过，仅给提示）..."
+
+    # 确保 unzip 可用
+    if ! command_exists unzip; then
+      log_note "未检测到 unzip，将尝试自动安装 unzip..."
+      if ! apt-get update -y >/dev/null 2>&1; then
+        log_warn "apt update 失败，跳过 GeneratePress 自动安装。"
+      else
+        if ! apt-get install -y unzip >/dev/null 2>&1; then
+          log_warn "安装 unzip 失败，跳过 GeneratePress 自动安装。"
+        fi
+      fi
+    fi
+
+    if command_exists unzip; then
+      if curl -fsSL -o "${gp_zip}" "https://downloads.wordpress.org/theme/generatepress.${gp_ver}.zip"; then
+        if unzip -q "${gp_zip}" -d "${SITE_DOCROOT}/wp-content/themes"; then
+          log_info "GeneratePress 主题已解压。"
+        else
+          log_warn "unzip 解压 GeneratePress 失败，稍后可在后台手动安装。"
+        fi
+      else
+        log_warn "下载 GeneratePress 失败，稍后可在后台手动安装。"
+      fi
     else
-      log_warn "下载 GeneratePress 失败，可能是网络问题，稍后可手动在后台安装。"
+      log_warn "系统中仍然没有 unzip，无法自动解压 GeneratePress，稍后可在后台手动安装。"
     fi
   fi
 
@@ -433,9 +462,8 @@ phpIniOverride  {
 }
 EOF
 
-  # 简单给站点单独设一个 lsphp 处理器（实际上复用全局配置）
   local vh_include="${lsws_conf}/httpd_config.conf"
-  if ! grep -q "${SITE_SLUG}_php" "${vh_include}"; then
+  if ! grep -q "virtualHost ${SITE_SLUG}" "${vh_include}" 2>/dev/null; then
     cat >> "${vh_include}" <<EOF
 
 extProcessor ${SITE_SLUG}_php {
@@ -515,10 +543,9 @@ cleanup_wp_site() {
   rm -rf "${root}"
   log_info "已删除 ${root}。"
 
-  # 同时尝试删除 vhost 配置
   rm -f "/usr/local/lsws/conf/vhosts/${slug}.conf" || true
-  sed -i "/virtualHost ${slug} /,/^}/d" /usr/local/lsws/conf/httpd_config.conf || true
-  sed -i "/vhmap.*${slug}\$/d" /usr/local/lsws/conf/httpd_config.conf || true
+  sed -i "/virtualHost ${slug} /,/^}/d" /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
+  sed -i "/vhmap.*${slug}\$/d" /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
 
   systemctl restart lsws || systemctl restart openlitespeed || true
 
@@ -530,7 +557,7 @@ cleanup_local_menu() {
   while true; do
     header
     echo ">>> 清理本机 OLS / WordPress："
-    echo "  1) 彻底移除本机 OLS（仅删除 openlitespeed + /usr/local/lsws）"
+    echo "  1) 彻底移除本机 OLS（卸载 openlitespeed + /usr/local/lsws）"
     echo "  2) 按 slug 清理本机某个 WordPress 站点（/var/www/<slug> + vhost）"
     echo "  3) 返回上一层"
     echo "  0) 退出脚本"
@@ -540,7 +567,7 @@ cleanup_local_menu() {
       1) cleanup_ols ;;
       2) cleanup_wp_site ;;
       3) return ;;
-      0) exit 0 ;;
+      0) echo "再见～"; exit 0 ;;
       *) log_warn "无效选项。"; pause ;;
     esac
   done
@@ -587,7 +614,7 @@ install_ols_wp_standard() {
   echo "  本机公网 IPv4    : ${pub4:-获取失败（可能没有 IPv4 或出网被限制）}"
   echo "  本机公网 IPv6    : ${pub6:-获取失败（可能没有 IPv6 或出网被限制）}"
   echo
-  log_note "请在 Cloudflare / 其他 DNS 供应商中，将上述 IPv4/IPv6 配置到 ${SITE_DOMAIN}。"
+  log_note "请在 Cloudflare / 其他 DNS 供应商中，将上述 IP 配置到 ${SITE_DOMAIN}。"
   log_note "⚠️ 建议首次调试时将记录设为『DNS only』，确认 HTTP 正常后再开启代理。"
   echo
 
