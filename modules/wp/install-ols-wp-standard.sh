@@ -1,456 +1,221 @@
 #!/usr/bin/env bash
-# install-ols-wp-standard.sh
-# v0.11 - OLS + WordPress 标准安装（HTTP 版，带环境自检 / 自动调优 / 清理工具）
-# 2025-12-09
 #
-# 变更摘要：
-# - 新增：环境自检（系统 / 端口 / 防火墙），打印排错提示，减少 521 类问题
-# - 新增：根据本机内存自动写入 WP_MEMORY_LIMIT / WP_MAX_MEMORY_LIMIT
-# - 新增：自动删除 Hello Dolly / Akismet，只保留最新默认主题 + GeneratePress
-# - 修复：数据库密码不再用占位符替换，改为双重输入校验 + mysql 连接测试
-# - 修复：打印公网 IPv4 / IPv6，不再误用 10.x 内网地址
-# - 修复：GeneratePress 下载 / 解压失败时不再导致脚本退出，缺 unzip 自动安装，失败仅 WARN
+# install-ols-wp-standard.sh
+# Version: v0.11 (2025-12-09)
+#
+# Changelog v0.11
+# - 新增“环境自检”：系统版本 / 端口监听 / UFW 提示 / 云厂商安全组提示
+# - 统一站点路径为 /var/www/<slug>/html（不写死任何真实机器名或域名）
+# - 在输入数据库信息后，实际用 mysql 测试连接和 USE <DB_NAME>，失败直接退出
+# - 自动生成独立 OLS Virtual Host 和 listener（HTTP + 可选 HTTPS）
+# - 支持 SSL 三选一：1) 仅 HTTP  2) Cloudflare Origin Cert  3) Let’s Encrypt
+# - 结束时打印站点信息和 IPv4/IPv6，提醒去 DNS 配置
+# - 清理功能本版只给安全提示，不自动删除任何文件，避免误删
+#
 
-set -Eeuo pipefail
+set -euo pipefail
 
-SCRIPT_NAME="install-ols-wp-standard.sh"
 SCRIPT_VERSION="v0.11"
 
-GREEN="\033[32m"
-YELLOW="\033[33m"
-RED="\033[31m"
-BLUE="\033[34m"
-CYAN="\033[36m"
-NC="\033[0m"
-
-# ---------------- 公共小工具 ----------------
-
-pause() {
-  echo
-  read -rp "按回车键继续..." _
-}
-
-press_enter_to_continue() {
-  echo
-  read -rp "按回车键返回上一层菜单..." _
-}
-
-log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
-log_note()  { echo -e "${CYAN}[NOTE]${NC} $*"; }
-
-ensure_root() {
-  if [[ "$(id -u)" -ne 0 ]]; then
-    log_error "请用 root 运行本脚本（或在前面加 sudo）。"
-    exit 1
-  fi
-}
-
-header() {
-  clear
-  echo -e "${BLUE}============================================================${NC}"
-  echo -e "${BLUE}  HorizonTech - OLS + WordPress 标准安装模块（${SCRIPT_VERSION}）${NC}"
-  echo -e "${BLUE}============================================================${NC}"
-  echo
-}
-
-header_step() {
-  local step="$1" total="$2" title="$3"
-  echo
-  echo -e "${BLUE}---- 步骤 ${step}/${total}: ${title} ----${NC}"
-}
-
-confirm_or_exit() {
-  read -rp "确认继续吗？(y/N): " ans
-  case "${ans:-N}" in
-    y|Y) ;;
-    *) log_warn "已取消当前操作。"; return 1 ;;
+# 彩色输出
+cecho() { # $1=level info/warn/error, $2=message
+  local level="$1"; shift || true
+  local msg="$*"
+  case "$level" in
+    info)  printf "\033[1;32m[INFO]\033[0m %s\n" "$msg" ;;
+    warn)  printf "\033[1;33m[WARN]\033[0m %s\n" "$msg" ;;
+    error) printf "\033[1;31m[ERROR]\033[0m %s\n" "$msg" ;;
+    *)     printf "[%s] %s\n" "$level" "$msg" ;;
   esac
 }
 
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
+pause() {
+  read -r -p "按回车继续..." _ || true
 }
 
-# ---------------- 环境自检 ----------------
-
-detect_public_ipv4() {
-  local ip=""
-  if command_exists curl; then
-    ip=$(curl -4 -fsS https://api.ipify.org 2>/dev/null \
-         || curl -4 -fsS https://ipv4.icanhazip.com 2>/dev/null \
-         || true)
+ensure_root() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    cecho error "请用 root（或 sudo）执行本脚本。"
+    exit 1
   fi
-  echo "$ip"
 }
 
-detect_public_ipv6() {
-  local ip=""
-  if command_exists curl; then
-    ip=$(curl -6 -fsS https://api64.ipify.org 2>/dev/null \
-         || curl -6 -fsS https://ipv6.icanhazip.com 2>/dev/null \
-         || true)
+show_header() {
+  echo "======================================================="
+  echo "  OLS + WordPress 标准安装模块  ${SCRIPT_VERSION}"
+  echo "======================================================="
+  echo
+}
+
+###########################################################
+# 1. 环境自检
+###########################################################
+env_check() {
+  cecho info "Step 1/4：环境自检（系统版本 / 端口 / 防火墙 / 云厂商安全组）"
+
+  # 系统信息
+  local os=""
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    os="${PRETTY_NAME:-}"
   fi
-  echo "$ip"
-}
+  cecho info "当前系统：${os:-未知}"
 
-env_check_summary() {
-  header_step 1 4 "环境自检"
+  # CPU / 内存
+  local mem_total
+  mem_total="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)"
+  cecho info "检测到内存约：${mem_total} MB"
 
-  echo "1) 系统信息："
-  echo "   - Hostname : $(hostname)"
-  echo "   - 内核     : $(uname -r)"
-  echo "   - 发行版   : $(grep -E '^(PRETTY_|NAME=)' /etc/os-release | sed 's/^/     /')"
+  if (( mem_total < 2048 )); then
+    cecho warn "当前内存 < 2G，不建议在本机同时跑 OLS + 数据库 + Redis。"
+  elif (( mem_total < 4096 )); then
+    cecho warn "当前内存 < 4G，建议数据库 / Redis 考虑使用其他高配实例，本机只跑 OLS + WordPress 前端或 LNMP。"
+  fi
+
+  echo
+  cecho info "检查 80 / 443 端口监听情况（仅查看，不做修改）..."
+  ss -lnpt '( sport = :80 or sport = :443 )' || true
   echo
 
-  echo "2) 硬件资源（粗略）："
-  local mem_kb mem_gb disk_total disk_avail
-  mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-  mem_gb=$(( (mem_kb + 1048575) / 1048576 ))
-  disk_total=$(df -h / | awk 'NR==2{print $2}')
-  disk_avail=$(df -h / | awk 'NR==2{print $4}')
-  echo "   - 内存约   : ${mem_gb} GB"
-  echo "   - 根分区   : 总计 ${disk_total} / 可用 ${disk_avail}"
-  if (( mem_gb < 4 )); then
-    log_warn "当前机器内存 < 4G，建议【只跑 OLS + WordPress 前端】，DB / Redis 放到其他高配机器。"
-  fi
-  echo
-
-  echo "3) 端口监听情况（80 / 443）："
-  if command_exists ss; then
-    ss -lntp | awk 'NR==1 || /:80 |:443 /'
+  # 防火墙
+  if command -v ufw >/dev/null 2>&1; then
+    local ufw_status
+    ufw_status="$(ufw status 2>/dev/null || true)"
+    cecho info "UFW 状态："
+    echo "$ufw_status"
+    echo
+    cecho warn "如 UFW 为 active，请确认已允许 80/tcp 和 443/tcp：例如"
+    echo "  ufw allow 80/tcp"
+    echo "  ufw allow 443/tcp"
   else
-    log_warn "未找到 ss 命令，无法展示端口监听情况。"
+    cecho info "未检测到 UFW（或未启用），略过本机防火墙检查。"
   fi
-  echo
 
-  echo "4) 防火墙（ufw）状态："
-  if command_exists ufw; then
-    ufw status verbose || true
-    log_note "如果 ufw 已启用，请确认 80/tcp 和 443/tcp 已允许。"
-  else
-    log_note "未检测到 ufw（也可能用的是别的防火墙或只靠云厂商安全组）。"
-  fi
   echo
-
-  log_note "⚠️ 重要：云厂商（例如 Oracle）安全列表里也要放行 80/443，否则前面 Cloudflare 绿灯，后面依然 521。"
+  cecho warn "请务必确认：云厂商后台（安全组 / 安全列表等）已经放行 80 和 443 端口。"
+  cecho warn "否则即使本机已监听端口，外网依然无法访问。"
   echo
 }
 
-# ---------------- OLS 安装 & 基础配置 ----------------
-
-install_ols_if_needed() {
-  header_step 2 4 "安装 / 检查 OpenLiteSpeed"
-
-  if command_exists lswsctrl || [[ -x /usr/local/lsws/bin/lswsctrl ]]; then
-    log_info "检测到已安装 OpenLiteSpeed，跳过安装，仅检查服务。"
-  else
-    log_info "未检测到 OpenLiteSpeed，准备安装（Ubuntu 22.04/24.04）。"
-
-    if ! command_exists wget; then
-      apt-get update -y
-      apt-get install -y wget
-    fi
-
-    wget -O - https://repo.litespeed.sh | bash
-    apt-get install -y openlitespeed lsphp83 lsphp83-mysql lsphp83-common
-
-    log_info "OpenLiteSpeed 安装完成。"
+###########################################################
+# 2. 确保 OLS 已安装
+###########################################################
+ensure_ols_installed() {
+  if command -v lswsctrl >/dev/null 2>&1 || [[ -x /usr/local/lsws/bin/lswsctrl ]]; then
+    cecho info "检测到 OpenLiteSpeed 已安装，将复用现有安装。"
+    return 0
   fi
 
-  systemctl enable --now lsws || systemctl enable --now openlitespeed || true
-
-  if ! systemctl is-active --quiet lsws && ! systemctl is-active --quiet openlitespeed; then
-    log_error "OpenLiteSpeed 服务未能启动，请手动检查。"
+  cecho warn "未检测到 OpenLiteSpeed，是否现在自动安装？"
+  read -r -p "输入 y 继续自动安装，其他任意键取消: " ans || true
+  if [[ "${ans,,}" != "y" ]]; then
+    cecho error "未安装 OLS，本模块无法继续。"
     exit 1
   fi
 
-  log_info "OpenLiteSpeed 服务运行中。"
-}
+  cecho info "开始安装 OpenLiteSpeed（官方仓库方式）..."
 
-# ---------------- 收集站点 / DB 信息 ----------------
-
-SITE_SLUG=""
-SITE_DOMAIN=""
-SITE_DOCROOT=""
-SITE_LOGROOT=""
-DB_HOST=""
-DB_PORT=""
-DB_NAME=""
-DB_USER=""
-DB_PASSWORD=""
-
-collect_site_info() {
-  header_step 3 4 "收集站点基本信息"
-
-  read -rp "请输入站点 slug（例如 ols-test，用于目录名和 vhost 名称）： " SITE_SLUG
-  SITE_SLUG="${SITE_SLUG:-ols-site}"
-
-  read -rp "请输入主域名（例如 ols.example.com，可先用测试域名）： " SITE_DOMAIN
-  SITE_DOMAIN="${SITE_DOMAIN:-ols.example.com}"
-
-  SITE_DOCROOT="/var/www/${SITE_SLUG}/html"
-  SITE_LOGROOT="/var/www/${SITE_SLUG}/logs"
-
-  log_info "站点将安装到：${SITE_DOCROOT}"
-  log_info "站点访问日志目录：${SITE_LOGROOT}"
-}
-
-collect_db_info() {
-  header_step 4 4 "收集数据库连接信息（必须是已存在的 DB / 用户）"
-
-  log_note "说明：本模块【不自动创建数据库和用户】，请先在 DB 机器上建好："
-  log_note "      - 数据库名（例如 ${SITE_SLUG}_wp）"
-  log_note "      - 专用 DB 用户（例如 ${SITE_SLUG}_user，并授予此库全部权限）"
-  echo
-
-  read -rp "请输入数据库 Host（IP / 域名 / Tailscale IP，默认 127.0.0.1）: " DB_HOST
-  DB_HOST="${DB_HOST:-127.0.0.1}"
-
-  read -rp "请输入数据库 Port（默认 3306）: " DB_PORT
-  DB_PORT="${DB_PORT:-3306}"
-
-  read -rp "请输入数据库名（必须与已创建的数据库名称完全一致，例如 ${SITE_SLUG}_wp）: " DB_NAME
-  DB_NAME="${DB_NAME:-${SITE_SLUG}_wp}"
-
-  read -rp "请输入数据库用户名（必须与已创建的用户完全一致，例如 ${SITE_SLUG}_user）: " DB_USER
-  DB_USER="${DB_USER:-${SITE_SLUG}_user}"
-
-  while true; do
-    read -rsp "请输入数据库密码（不会回显，建议用密码管理器保存，禁止包含单引号 ' ）: " DB_PASSWORD
-    echo
-    if [[ "$DB_PASSWORD" == *"'"* ]]; then
-      log_warn "密码中不能包含单引号 ' ，请重新输入。"
-      continue
-    fi
-    read -rsp "请再输入一次数据库密码以确认: " DB_PASSWORD2
-    echo
-    if [[ "$DB_PASSWORD" != "$DB_PASSWORD2" ]]; then
-      log_warn "两次输入不一致，请重新输入。"
-      continue
-    fi
-    break
-  done
-
-  log_info "现在测试数据库连接是否正确..."
-  if ! command_exists mysql; then
-    log_note "未检测到 mysql/mariadb 客户端，将自动安装 mariadb-client。"
-    apt-get update -y
-    apt-get install -y mariadb-client
+  # 只针对 Debian/Ubuntu 系列简单处理
+  if ! command -v apt-get >/dev/null 2>&1; then
+    cecho error "当前系统非 Debian/Ubuntu，自动安装 OLS 未实现，请手动安装后重试。"
+    exit 1
   fi
 
-  if MYSQL_PWD="${DB_PASSWORD}" \
-     mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" \
-     -e "SELECT 1;" >/dev/null 2>&1; then
-    log_info "数据库连接测试成功。"
-  else
-    log_error "数据库连接失败，请检查 Host / Port / DB 名 / 用户 / 密码是否正确。"
-    confirm_or_exit || exit 1
-  fi
-}
+  # 安装必要依赖
+  apt-get update
+  apt-get install -y curl ca-certificates gnupg lsb-release
 
-# ---------------- 准备目录 & 安装 WordPress ----------------
-
-prepare_docroot() {
-  header_step 1 3 "创建站点目录与权限"
-
-  mkdir -p "${SITE_DOCROOT}" "${SITE_LOGROOT}"
-
-  chown -R nobody:nogroup "/var/www/${SITE_SLUG}"
-  find "/var/www/${SITE_SLUG}" -type d -exec chmod 755 {} \;
-  find "/var/www/${SITE_SLUG}" -type f -exec chmod 644 {} \;
-
-  log_info "站点目录与权限已就绪：${SITE_DOCROOT}"
-}
-
-install_wordpress_core() {
-  header_step 2 3 "下载并安装最新英文版 WordPress"
-
-  if [[ -f "${SITE_DOCROOT}/wp-settings.php" ]]; then
-    log_warn "检测到 ${SITE_DOCROOT} 下已有 WordPress 文件，将跳过重新下载。"
-    return
-  fi
-
-  cd /tmp
-  rm -rf wordpress latest.tar.gz
-  curl -fsSLO https://wordpress.org/latest.tar.gz
-  tar -xzf latest.tar.gz
-  cp -a wordpress/. "${SITE_DOCROOT}/"
-  rm -rf wordpress latest.tar.gz
-
-  chown -R nobody:nogroup "${SITE_DOCROOT}"
-  log_info "WordPress 核心文件已安装到 ${SITE_DOCROOT}"
-}
-
-generate_wp_config() {
-  header_step 3 3 "生成 wp-config.php（写入 DB 信息 + 基础调优）"
-
-  local wp_config="${SITE_DOCROOT}/wp-config.php"
-
-  if [[ -f "${wp_config}" ]]; then
-    log_warn "检测到已存在 wp-config.php，将覆盖其中的 DB 配置相关部分。"
-  fi
-
-  local salts
-  salts=$(curl -fsS https://api.wordpress.org/secret-key/1.1/salt/ || true)
-  if [[ -z "${salts}" ]]; then
-    log_warn "获取官方 SALT 失败，将使用本地随机字符串。"
-    local tmp_salt
-    tmp_salt=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64)
-    salts=$(printf "define('AUTH_KEY', '%s');\n" "$tmp_salt")
-  fi
-
-  cat > "${wp_config}" <<EOF
-<?php
-/** 自动生成的 wp-config.php（${SCRIPT_VERSION}） */
-
-define( 'DB_NAME', '${DB_NAME}' );
-define( 'DB_USER', '${DB_USER}' );
-define( 'DB_PASSWORD', '${DB_PASSWORD}' );
-define( 'DB_HOST', '${DB_HOST}:${DB_PORT}' );
-define( 'DB_CHARSET', 'utf8mb4' );
-define( 'DB_COLLATE', '' );
-
-${salts}
-
-/**
- * 表前缀：如需多个站点共享 DB，可修改。
- */
-\$table_prefix = 'wp_';
-
-/**
- * 建议关闭 WP 内置假 cron，由 systemd 定时任务驱动（可配合 gen-wp-cron 模块）。
- */
-define( 'DISABLE_WP_CRON', true );
-
-/* 自动调优部分将在稍后由脚本写入（WP_MEMORY_LIMIT 等）。 */
-
-if ( ! defined( 'ABSPATH' ) ) {
-  define( 'ABSPATH', __DIR__ . '/' );
-}
-require_once ABSPATH . 'wp-settings.php';
-EOF
-
-  chown nobody:nogroup "${wp_config}"
-  chmod 640 "${wp_config}"
-
-  auto_tune_wp_config "${wp_config}"
-
-  log_info "wp-config.php 已生成并写入数据库配置 + 基础调优。"
-}
-
-auto_tune_wp_config() {
-  local wp_config="$1"
-  header_step "3b" 3 "根据本机内存自动调节 WP 内存限制"
-
-  local mem_kb mem_gb wp_mem wp_max
-  mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-  mem_gb=$(( (mem_kb + 1048575) / 1048576 ))
-
-  if (( mem_gb < 4 )); then
-    wp_mem="96M"
-    wp_max="192M"
-    log_note "内存 < 4G：WP_MEMORY_LIMIT=${wp_mem}，WP_MAX_MEMORY_LIMIT=${wp_max}。"
-  elif (( mem_gb < 8 )); then
-    wp_mem="128M"
-    wp_max="256M"
-    log_note "内存约 ${mem_gb}G：WP_MEMORY_LIMIT=${wp_mem}，WP_MAX_MEMORY_LIMIT=${wp_max}。"
-  else
-    wp_mem="196M"
-    wp_max="384M"
-    log_note "内存 ≥ 8G：WP_MEMORY_LIMIT=${wp_mem}，WP_MAX_MEMORY_LIMIT=${wp_max}。"
-  fi
-
-  awk -v wp_mem="$wp_mem" -v wp_max="$wp_max" '
-    /require_once ABSPATH . '\''wp-settings.php'\'';/ {
-      print "define( '\''WP_MEMORY_LIMIT'\'', '\''"wp_mem"'\'' );"
-      print "define( '\''WP_MAX_MEMORY_LIMIT'\'', '\''"wp_max"'\'' );"
-      print ""
-      print $0
-      next
+  # LiteSpeed 官方 repo（简化写法，生产环境建议对照官方文档）
+  if [[ ! -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
+    cecho info "添加 LiteSpeed 官方仓库..."
+    curl -fsSL https://repo.litespeed.sh | bash || {
+      cecho error "添加 LiteSpeed 仓库失败，请检查网络或稍后再试。"
+      exit 1
     }
-    { print }
-  ' "$wp_config" > "${wp_config}.tmp" && mv "${wp_config}.tmp" "$wp_config"
-}
-
-post_install_cleanup() {
-  header_step 4 4 "清理默认插件 / 主题（尽量让 Site Health 更干净）"
-
-  # 删除默认插件 Hello Dolly / Akismet
-  rm -rf "${SITE_DOCROOT}/wp-content/plugins/hello.php" \
-         "${SITE_DOCROOT}/wp-content/plugins/akismet" || true
-
-  # 安装 GeneratePress 主题（失败只 WARN，不中断脚本）
-  local gp_ver="3.6.1"
-  local gp_zip="/tmp/generatepress-${gp_ver}.zip"
-
-  if [[ ! -d "${SITE_DOCROOT}/wp-content/themes/generatepress" ]]; then
-    log_info "尝试自动安装 GeneratePress ${gp_ver} 主题（失败将跳过，仅给提示）..."
-
-    # 确保 unzip 可用
-    if ! command_exists unzip; then
-      log_note "未检测到 unzip，将尝试自动安装 unzip..."
-      if ! apt-get update -y >/dev/null 2>&1; then
-        log_warn "apt update 失败，跳过 GeneratePress 自动安装。"
-      else
-        if ! apt-get install -y unzip >/dev/null 2>&1; then
-          log_warn "安装 unzip 失败，跳过 GeneratePress 自动安装。"
-        fi
-      fi
-    fi
-
-    if command_exists unzip; then
-      if curl -fsSL -o "${gp_zip}" "https://downloads.wordpress.org/theme/generatepress.${gp_ver}.zip"; then
-        if unzip -q "${gp_zip}" -d "${SITE_DOCROOT}/wp-content/themes"; then
-          log_info "GeneratePress 主题已解压。"
-        else
-          log_warn "unzip 解压 GeneratePress 失败，稍后可在后台手动安装。"
-        fi
-      else
-        log_warn "下载 GeneratePress 失败，稍后可在后台手动安装。"
-      fi
-    else
-      log_warn "系统中仍然没有 unzip，无法自动解压 GeneratePress，稍后可在后台手动安装。"
-    fi
   fi
 
-  # 保留 twentytwentyfive + generatepress，删除 twentytwentythree / twentytwentyfour
-  rm -rf "${SITE_DOCROOT}/wp-content/themes/twentytwentythree" \
-         "${SITE_DOCROOT}/wp-content/themes/twentytwentyfour" || true
+  cecho info "安装 openlitespeed 和 lsphp..."
+  apt-get install -y openlitespeed lsphp83
 
-  chown -R nobody:nogroup "${SITE_DOCROOT}/wp-content"
-  log_info "默认插件/主题清理完成。"
+  cecho info "启动并设置开机自启..."
+  /usr/local/lsws/bin/lswsctrl start || true
+  systemctl enable lsws || true
+
+  cecho info "OpenLiteSpeed 安装步骤完成。"
 }
 
-# ---------------- OLS vhost 基础配置（仅 HTTP） ----------------
+###########################################################
+# 3. 数据库连接测试
+###########################################################
+test_db_connection() {
+  local host="$1" port="$2" user="$3" pass="$4" db="$5"
 
-configure_ols_vhost() {
-  header_step 4 4 "为站点创建 OLS 虚拟主机（仅 HTTP 80）"
+  cecho info "测试数据库连接：${user}@${host}:${port}，数据库：${db}"
+  if ! command -v mysql >/dev/null 2>&1; then
+    cecho error "未检测到 mysql 客户端，请先安装（例如 apt-get install -y mysql-client）。"
+    exit 1
+  fi
 
-  local lsws_conf="/usr/local/lsws/conf"
-  local vhost_conf="${lsws_conf}/vhosts/${SITE_SLUG}.conf"
+  # -e 'USE db' 可以同时验证连接和数据库是否存在
+  if MYSQL_PWD="$pass" mysql -h "$host" -P "$port" -u "$user" -e "USE \`$db\`;" >/dev/null 2>&1; then
+    cecho info "数据库连接测试成功。"
+  else
+    cecho error "数据库连接失败，请检查：DB 主机 / 端口 / 用户名 / 密码 / 数据库名 是否正确。"
+    cecho error "建议重新确认 wp-config.php、或直接在 DB 宿主机上用 mysql 命令测试。"
+    exit 1
+  fi
+}
 
-  mkdir -p "${lsws_conf}/vhosts"
+###########################################################
+# 4. 生成随机 SALT
+###########################################################
+generate_wp_salts() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL https://api.wordpress.org/secret-key/1.1/salt/ || return 1
+  else
+    return 1
+  fi
+}
 
-  cat > "${vhost_conf}" <<EOF
-docRoot                   ${SITE_DOCROOT}
-vhDomain                  ${SITE_DOMAIN}
-vhAliases                 www.${SITE_DOMAIN}
-adminEmails               you@example.com
-enableScript              1
-scriptHandler             lsapi:${SITE_SLUG}_php
+###########################################################
+# 5. 配置 OLS vhost & listener
+###########################################################
+configure_ols_vhost_and_listener() {
+  local slug="$1" domain="$2" ssl_mode="$3" ssl_key="$4" ssl_cert="$5"
 
-errorlog ${SITE_LOGROOT}/error.log {
+  local lsws_dir="/usr/local/lsws"
+  local httpd_conf="${lsws_dir}/conf/httpd_config.conf"
+  local vhost_dir="${lsws_dir}/conf/vhosts/${slug}"
+  local vhconf="${vhost_dir}/vhconf.conf"
+
+  if [[ ! -f "$httpd_conf" ]]; then
+    cecho error "未找到 ${httpd_conf}，OLS 配置目录不符合预期。"
+    exit 1
+  fi
+
+  mkdir -p "$vhost_dir"
+
+  cecho info "写入 Virtual Host 配置：${vhconf}"
+
+  cat > "$vhconf" <<EOF
+docRoot                   /var/www/${slug}/html/
+vhRoot                    /var/www/${slug}/
+configFile                conf/vhosts/${slug}/vhconf.conf
+enableGzip                1
+enableIpGeo               0
+
+errorlog logs/${slug}_error.log {
   useServer               0
-  logLevel                ERROR
+  logLevel                NOTICE
   rollingSize             10M
 }
 
-accesslog ${SITE_LOGROOT}/access.log {
+accesslog logs/${slug}_access.log {
   useServer               0
-  logFormat               "%h %l %u %t \"%r\" %>s %b"
+  logHeaders              3
   rollingSize             10M
+  keepDays                7
 }
 
 index  {
@@ -458,190 +223,320 @@ index  {
   indexFiles              index.php,index.html
 }
 
+context / {
+  type                    root
+  location                /
+  allowBrowse             1
+}
+
 phpIniOverride  {
 }
 EOF
 
-  local vh_include="${lsws_conf}/httpd_config.conf"
-  if ! grep -q "virtualHost ${SITE_SLUG}" "${vh_include}" 2>/dev/null; then
-    cat >> "${vh_include}" <<EOF
+  # 在 httpd_config.conf 中增加 virtualhost 块（如不存在）
+  if ! grep -q "virtualhost ${slug} " "$httpd_conf"; then
+    cecho info "在 httpd_config.conf 中注册 virtualhost ${slug} ..."
+    cat >> "$httpd_conf" <<EOF
 
-extProcessor ${SITE_SLUG}_php {
-  type                    lsapi
-  address                 uds://tmp/lshttpd/${SITE_SLUG}_php.sock
-  maxConns                35
-  env                     LSAPI_CHILDREN=35
-  path                    /usr/local/lsws/lsphp83/bin/lsphp
-  initTimeout             60
-  retryTimeout            0
-  persistConn             1
-  responseBuffer          0
-  autoStart               1
-  maxIdleTime             10
-  priority                0
-  memSoftLimit            2047M
-  memHardLimit            2047M
-  procSoftLimit           400
-  procHardLimit           500
-}
-
-virtualHost ${SITE_SLUG} {
-  vhRoot                  /var/www/${SITE_SLUG}/
-  configFile              conf/vhosts/${SITE_SLUG}.conf
+virtualhost ${slug} {
+  vhRoot                  /var/www/${slug}/
+  configFile              conf/vhosts/${slug}/vhconf.conf
   allowSymbolLink         1
   enableScript            1
-  restrained              0
-}
-
-listener listener80 {
-  address                 *:80
-  secure                  0
-}
-
-listener listener80 {
-  vhmap                   ${SITE_DOMAIN} ${SITE_SLUG}
+  restrained              1
 }
 EOF
+  else
+    cecho warn "httpd_config.conf 中已存在 virtualhost ${slug}，跳过新增 virtualhost 段。"
   fi
 
-  systemctl restart lsws || systemctl restart openlitespeed || true
-  log_info "OLS 虚拟主机已配置并重启。"
+  # 新增 HTTP listener（独立，避免动现有 listener）
+  if ! grep -q "listener ${slug}-HTTP" "$httpd_conf"; then
+    cecho info "新增 HTTP listener ${slug}-HTTP 监听 *:80 ..."
+    cat >> "$httpd_conf" <<EOF
+
+listener ${slug}-HTTP {
+  address                 *:80
+  secure                  0
+  map                     ${slug} ${domain}
 }
-
-# ---------------- 清理 OLS / WordPress ----------------
-
-cleanup_ols() {
-  header_step 1 2 "彻底移除本机 OLS（openlitespeed + lsphp83）"
-
-  echo "本操作会卸载 openlitespeed / lsphp83 并删除 /usr/local/lsws（不会动 /var/www）。"
-  confirm_or_exit || return 0
-
-  systemctl stop lsws || systemctl stop openlitespeed || true
-  apt-get remove --purge -y openlitespeed lsphp* || true
-  rm -rf /usr/local/lsws
-
-  log_info "本机 OLS 已尝试卸载完成（如有残留可手动检查 /usr/local/lsws）。"
-  press_enter_to_continue
-}
-
-cleanup_wp_site() {
-  header_step 2 2 "按 slug 清理本机某个 WordPress 站点"
-
-  read -rp "请输入要清理的站点 slug（例如 ols-test）： " slug
-  [[ -z "${slug}" ]] && { log_warn "slug 不能为空。"; press_enter_to_continue; return; }
-
-  local root="/var/www/${slug}"
-  if [[ ! -d "${root}" ]]; then
-    log_warn "目录 ${root} 不存在，似乎本机没有该站点。"
-    press_enter_to_continue
-    return
+EOF
+  else
+    cecho warn "httpd_config.conf 中已存在 listener ${slug}-HTTP，跳过创建。"
   fi
 
-  echo "将删除目录：${root}"
-  confirm_or_exit || return
+  # 根据 ssl_mode 设置 HTTPS listener
+  # ssl_mode: 1=无SSL  2=Cloudflare Origin Cert  3=Let's Encrypt
+  if [[ "$ssl_mode" != "1" ]]; then
+    if ! grep -q "listener ${slug}-HTTPS" "$httpd_conf"; then
+      cecho info "新增 HTTPS listener ${slug}-HTTPS 监听 *:443 ..."
+      cat >> "$httpd_conf" <<EOF
 
-  rm -rf "${root}"
-  log_info "已删除 ${root}。"
+listener ${slug}-HTTPS {
+  address                 *:443
+  secure                  1
+  keyFile                 ${ssl_key}
+  certFile                ${ssl_cert}
+  map                     ${slug} ${domain}
+}
+EOF
+    else
+      cecho warn "httpd_config.conf 中已存在 listener ${slug}-HTTPS，跳过创建。"
+    fi
+  else
+    cecho warn "本次选择不配置 SSL，暂不创建 HTTPS listener。"
+  fi
 
-  rm -f "/usr/local/lsws/conf/vhosts/${slug}.conf" || true
-  sed -i "/virtualHost ${slug} /,/^}/d" /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
-  sed -i "/vhmap.*${slug}\$/d" /usr/local/lsws/conf/httpd_config.conf 2>/dev/null || true
+  cecho info "尝试重启 OpenLiteSpeed 应用新配置..."
+  if command -v lswsctrl >/dev/null 2>&1; then
+    lswsctrl restart || true
+  elif command -v systemctl >/dev/null 2>&1; then
+    systemctl restart lsws || true
+  fi
 
-  systemctl restart lsws || systemctl restart openlitespeed || true
-
-  log_info "与该 slug 相关的 OLS vhost 配置也已尽量清理。"
-  press_enter_to_continue
+  cecho info "Virtual Host + listener 配置步骤完成。"
 }
 
-cleanup_local_menu() {
-  while true; do
-    header
-    echo ">>> 清理本机 OLS / WordPress："
-    echo "  1) 彻底移除本机 OLS（卸载 openlitespeed + /usr/local/lsws）"
-    echo "  2) 按 slug 清理本机某个 WordPress 站点（/var/www/<slug> + vhost）"
-    echo "  3) 返回上一层"
-    echo "  0) 退出脚本"
-    echo
-    read -rp "请输入选项: " c
-    case "${c:-3}" in
-      1) cleanup_ols ;;
-      2) cleanup_wp_site ;;
-      3) return ;;
-      0) echo "再见～"; exit 0 ;;
-      *) log_warn "无效选项。"; pause ;;
-    esac
-  done
+###########################################################
+# 6. 主安装流程：OLS + WP
+###########################################################
+install_ols_wp() {
+  env_check
+  ensure_ols_installed
+
+  echo
+  cecho info "Step 2/4：收集站点基本信息"
+
+  local slug domain
+  read -r -p "请输入站点代号（slug，例如 ols-demo 或 blog，不含空格）: " slug
+  if [[ -z "$slug" ]]; then
+    cecho error "slug 不能为空。"
+    exit 1
+  fi
+
+  read -r -p "请输入站点域名（例如 blog.example.com）: " domain
+  if [[ -z "$domain" ]]; then
+    cecho error "域名不能为空。"
+    exit 1
+  fi
+
+  local wp_root="/var/www/${slug}/html"
+  mkdir -p "$wp_root"
+
+  echo
+  cecho info "Step 3/4：数据库信息（请严格按照已存在的 DB 配置填写）"
+  cecho warn "提示：这是“公共脚本”，不会帮你创建数据库和用户。请提前在 DB 宿主机创建："
+  echo "  - 数据库（如 ${slug}_wp）"
+  echo "  - 对应用户（如 ${slug}_user）并授予该库全部权限"
+  echo
+
+  local db_host db_port db_name db_user db_pass
+  read -r -p "DB 主机（Host，例如 127.0.0.1 或 内网 / Tailscale IP）: " db_host
+  db_host="${db_host:-127.0.0.1}"
+
+  read -r -p "DB 端口（Port，默认 3306）: " db_port
+  db_port="${db_port:-3306}"
+
+  read -r -p "DB 数据库名（例如 ${slug}_wp，必须是已创建好的）: " db_name
+  if [[ -z "$db_name" ]]; then
+    cecho error "数据库名不能为空。"
+    exit 1
+  fi
+
+  read -r -p "DB 用户名（例如 ${slug}_user）: " db_user
+  if [[ -z "$db_user" ]]; then
+    cecho error "DB 用户名不能为空。"
+    exit 1
+  fi
+
+  read -r -s -p "DB 密码（输入时不显示）: " db_pass
+  echo
+  if [[ -z "$db_pass" ]]; then
+    cecho error "DB 密码不能为空。"
+    exit 1
+  fi
+
+  # 实测数据库连接
+  test_db_connection "$db_host" "$db_port" "$db_user" "$db_pass" "$db_name"
+
+  echo
+  cecho info "Step 4/4：选择 SSL 模式"
+  echo "  1) 暂时仅 HTTP（以后自己配置 SSL）"
+  echo "  2) 使用 Cloudflare Origin Certificate（你已在 CF 生成 key/cert）"
+  echo "  3) 使用 Let’s Encrypt 自动申请和续期（需确保 80 端口可被公网访问）"
+  read -r -p "请选择 [1-3]（默认 1）: " ssl_choice
+  ssl_choice="${ssl_choice:-1}"
+  if [[ "$ssl_choice" != "1" && "$ssl_choice" != "2" && "$ssl_choice" != "3" ]]; then
+    cecho warn "输入无效，默认选择 1（仅 HTTP）。"
+    ssl_choice="1"
+  fi
+
+  local ssl_key_file=""
+  local ssl_cert_file=""
+
+  if [[ "$ssl_choice" == "2" ]]; then
+    cecho info "请先在 Cloudflare 后台为 ${domain} 创建 Origin Certificate。"
+    read -r -p "请输入保存到本机的 key 文件路径（例如 /etc/ssl/private/${slug}.key）: " ssl_key_file
+    read -r -p "请输入保存到本机的 cert 文件路径（例如 /etc/ssl/certs/${slug}.crt）: " ssl_cert_file
+    if [[ ! -f "$ssl_key_file" || ! -f "$ssl_cert_file" ]]; then
+      cecho error "找不到 key 或 cert 文件，请确认路径。"
+      exit 1
+    fi
+  elif [[ "$ssl_choice" == "3" ]]; then
+    cecho info "将尝试通过 Let’s Encrypt (certbot) 为 ${domain} 申请证书。"
+    cecho warn "请确认："
+    cecho warn "  - DNS 已有 A 记录将 ${domain} 指向本机 IPv4"
+    cecho warn "  - 暂时将此记录设为 DNS only（不经过 Cloudflare 代理），否则 HTTP-01 验证可能失败。"
+    pause
+
+    if ! command -v certbot >/dev/null 2>&1; then
+      cecho info "安装 certbot..."
+      apt-get update
+      apt-get install -y certbot
+    fi
+
+    # 使用 standalone 模式占用 80 端口申请证书
+    systemctl stop lsws || true
+    cecho info "停止 OLS 后申请 Let’s Encrypt 证书..."
+    certbot certonly --standalone -d "$domain" --non-interactive --agree-tos -m "admin@${domain}" || {
+      cecho error "Let’s Encrypt 申请失败，请检查域名解析和 80 端口连通性。"
+      systemctl start lsws || true
+      exit 1
+    }
+    systemctl start lsws || true
+
+    ssl_key_file="/etc/letsencrypt/live/${domain}/privkey.pem"
+    ssl_cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
+
+    if [[ ! -f "$ssl_key_file" || ! -f "$ssl_cert_file" ]]; then
+      cecho error "未找到 Let’s Encrypt 生成的证书文件。"
+      exit 1
+    fi
+
+    cecho info "Let’s Encrypt 证书申请完成。certbot 已自动配置续期。"
+  fi
+
+  echo
+  cecho info "下载并部署 WordPress 到 ${wp_root} ..."
+
+  # 下载 WP 最新版
+  local tmp_zip="/tmp/latest-wp.zip"
+  curl -fsSL https://wordpress.org/latest.zip -o "$tmp_zip"
+  rm -rf "${wp_root}"/*
+  unzip -q "$tmp_zip" -d /tmp/wp-install-tmp
+  # 解压出来是 /tmp/wp-install-tmp/wordpress/*
+  mv /tmp/wp-install-tmp/wordpress/* "$wp_root"/
+  rm -rf /tmp/wp-install-tmp "$tmp_zip"
+
+  cecho info "生成 wp-config.php ..."
+  local wp_config="${wp_root}/wp-config.php"
+  cp "${wp_root}/wp-config-sample.php" "$wp_config"
+
+  # 替换数据库配置
+  sed -i "s/database_name_here/${db_name}/" "$wp_config"
+  sed -i "s/username_here/${db_user}/" "$wp_config"
+  sed -i "s/password_here/${db_pass}/" "$wp_config"
+  sed -i "s/localhost/${db_host}/" "$wp_config"
+
+  # 设置 DB 端口（如非默认）
+  if [[ "$db_port" != "3306" ]]; then
+    # 通过定义常量方式指定端口
+    sed -i "/DB_HOST/s/'${db_host}'/'${db_host}:${db_port}'/" "$wp_config"
+  fi
+
+  # 写入 SALT
+  local salts
+  if salts="$(generate_wp_salts)"; then
+    sed -i "/AUTH_KEY/d;/SECURE_AUTH_KEY/d;/LOGGED_IN_KEY/d;/NONCE_KEY/d;/AUTH_SALT/d;/SECURE_AUTH_SALT/d;/LOGGED_IN_SALT/d;/NONCE_SALT/d" "$wp_config"
+    printf "%s\n" "$salts" >> "$wp_config"
+  else
+    cecho warn "获取在线 SALT 失败，使用默认样例（安全性略低，建议后续手动替换）。"
+  fi
+
+  # 设置权限（以 nobody:nogroup 为例，可视环境调整）
+  if id nobody >/dev/null 2>&1; then
+    chown -R nobody:nogroup "/var/www/${slug}"
+  fi
+  find "/var/www/${slug}" -type d -exec chmod 755 {} \;
+  find "/var/www/${slug}" -type f -exec chmod 644 {} \;
+
+  # 配置 OLS vhost + listener
+  configure_ols_vhost_and_listener "$slug" "$domain" "$ssl_choice" "$ssl_key_file" "$ssl_cert_file"
+
+  # 尝试探测 IPv4/IPv6
+  local ipv4 ipv6
+  ipv4="$(curl -s4 https://ifconfig.co 2>/dev/null || true)"
+  ipv6="$(curl -s6 https://ifconfig.co 2>/dev/null || true)"
+
+  echo
+  echo "======================================================="
+  cecho info "安装流程完成（不代表外网一定能直接访问，请按下列信息检查）："
+  echo
+  echo "  站点 slug：      ${slug}"
+  echo "  站点域名：        ${domain}"
+  echo "  WordPress 路径： /var/www/${slug}/html"
+  echo "  DB_HOST：        ${db_host}"
+  echo "  DB_PORT：        ${db_port}"
+  echo "  DB_NAME：        ${db_name}"
+  echo "  DB_USER：        ${db_user}"
+  echo
+  echo "  系统探测到的公网 IPv4（仅供参考）：${ipv4:-获取失败}"
+  echo "  系统探测到的公网 IPv6（仅供参考）：${ipv6:-获取失败}"
+  echo
+  cecho warn "请在域名 DNS 里："
+  echo "  1) 先只添加 A 记录 → 本机 IPv4，类型设为 DNS only 做联通性测试；"
+  echo "  2) 使用 http://${domain} 测试站点是否可以正常打开；"
+  echo "  3) 确认无误后，再按需添加 AAAA 记录和 Cloudflare 代理（橙云）；"
+  echo "  4) 如本次脚本已配置 SSL，再把 Cloudflare SSL/TLS 模式设为 Full (strict)。"
+  echo "======================================================="
 }
 
-# ---------------- 主安装流程 ----------------
-
-install_ols_wp_standard() {
-  header
-  log_info "当前版本：${SCRIPT_VERSION}"
+###########################################################
+# 7. 清理功能（本版只提示，不自动删除）
+###########################################################
+cleanup_notice() {
   echo
-
-  env_check_summary
-  confirm_or_exit || return
-
-  install_ols_if_needed
-  collect_site_info
-  collect_db_info
-
-  prepare_docroot
-  install_wordpress_core
-  generate_wp_config
-  post_install_cleanup
-  configure_ols_vhost
-
+  cecho warn "【重要】为了避免误删，本版本不会自动删除任何 OLS / WordPress / DB / Redis。"
   echo
-  log_info "✅ OLS + WordPress 标准站点安装完成。"
+  echo "建议手动清理的大致步骤（示意）："
+  echo "  1) 备份："
+  echo "     - 导出对应数据库（mysqldump ...）"
+  echo "     - 备份站点目录（/var/www/<slug>）"
+  echo "  2) 删除站点文件："
+  echo "     - rm -rf /var/www/<slug>"
+  echo "  3) 如要移除 vhost："
+  echo "     - 编辑 /usr/local/lsws/conf/httpd_config.conf，删除对应 virtualhost 和 listener 段"
+  echo "     - 删除 /usr/local/lsws/conf/vhosts/<slug> 目录"
+  echo "     - 重启 lsws"
+  echo "  4) 数据库 / Redis 清理："
+  echo "     - 在 DB 宿主机上 DROP DATABASE / DROP USER"
+  echo "     - Redis 可根据业务手动 FLUSHDB / 删除 key"
   echo
-
-  local pub4 pub6
-  pub4=$(detect_public_ipv4)
-  pub6=$(detect_public_ipv6)
-
-  echo "================ 安装结果摘要 ================"
-  echo "  站点 slug        : ${SITE_SLUG}"
-  echo "  站点目录         : ${SITE_DOCROOT}"
-  echo "  主域名           : ${SITE_DOMAIN}"
-  echo
-  echo "  数据库 Host      : ${DB_HOST}"
-  echo "  数据库 Port      : ${DB_PORT}"
-  echo "  数据库名         : ${DB_NAME}"
-  echo "  数据库用户       : ${DB_USER}"
-  echo
-  echo "  本机公网 IPv4    : ${pub4:-获取失败（可能没有 IPv4 或出网被限制）}"
-  echo "  本机公网 IPv6    : ${pub6:-获取失败（可能没有 IPv6 或出网被限制）}"
-  echo
-  log_note "请在 Cloudflare / 其他 DNS 供应商中，将上述 IP 配置到 ${SITE_DOMAIN}。"
-  log_note "⚠️ 建议首次调试时将记录设为『DNS only』，确认 HTTP 正常后再开启代理。"
-  echo
-
-  press_enter_to_continue
+  cecho warn "等我们把标准安装路径完全验证稳定后，再添加真正的自动清理功能。"
 }
 
-# ---------------- 主菜单 ----------------
-
+###########################################################
+# 8. 主菜单
+###########################################################
 main_menu() {
-  while true; do
-    header
-    echo "菜单选项："
-    echo "  1) 安装 / 初始化 OLS + WordPress 标准站点"
-    echo "  2) 仅运行环境自检（端口 / 防火墙 / 资源概览）"
-    echo "  3) 清理本机 OLS / WordPress（卸载 OLS / 按 slug 删除站点）"
-    echo "  0) 退出脚本"
-    echo
-    read -rp "请输入选项: " choice
-    case "${choice:-0}" in
-      1) install_ols_wp_standard ;;
-      2) header; env_check_summary; press_enter_to_continue ;;
-      3) cleanup_local_menu ;;
-      0) echo "再见～"; exit 0 ;;
-      *) log_warn "无效选项，请重新输入。"; pause ;;
-    esac
-  done
+  ensure_root
+  show_header
+
+  echo "菜单选项 / Menu options"
+  echo "  1) 安装 / 修复 单站 OLS + WordPress（标准模式）"
+  echo "  2) 仅做环境自检（端口 / 防火墙 / 云厂商安全组提示）"
+  echo "  3) 查看“如何手动清理本机 OLS / WordPress / DB/Redis”的安全说明"
+  echo "  0) 退出"
+  echo
+
+  read -r -p "请输入选项并按回车: " choice || true
+  case "$choice" in
+    1) install_ols_wp ;;
+    2) env_check ;;
+    3) cleanup_notice ;;
+    0) echo "再见～"; exit 0 ;;
+    *) cecho error "无效选项。"; exit 1 ;;
+  esac
 }
 
-ensure_root
 main_menu
