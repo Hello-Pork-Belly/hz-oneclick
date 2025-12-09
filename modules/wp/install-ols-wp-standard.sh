@@ -3,17 +3,23 @@ set -Eeo pipefail
 cd /
 
 # install-ols-wp-standard.sh
-# Version: v0.8
+# Version: v0.9
 # 更新记录:
-# - 修复: 不再安装不存在的 lsphp83-xml / lsphp83-zip 包，避免 apt 报错中断。
-# - 新增: 顶层主菜单 (0/1/2/3/4)，支持安装、LNMP 占位、本机 OLS/WordPress 清理、DB/Redis 清理。
-# - 新增: “清理本机 OLS / WordPress” 二级菜单:
+# - v0.9:
+#   - 完成“彻底移除本机 OLS”“按 slug 清理站点”后，不再直接退出脚本，
+#     而是提示已完成并返回「清理本机 OLS / WordPress」菜单。
+#   - 完成“清理数据库 / Redis”后，不再直接退出脚本，而是返回「清理数据库 / Redis」菜单。
+#   - 安装流程完成后，在总结信息下方新增简单菜单：1) 返回主菜单  0) 退出脚本。
+# - v0.8:
+#   - 修复: 不再安装不存在的 lsphp83-xml / lsphp83-zip 包，避免 apt 报错中断。
+#   - 新增: 顶层主菜单 (0/1/2/3/4)，支持安装、LNMP 占位、本机 OLS/WordPress 清理、DB/Redis 清理。
+#   - 新增: “清理本机 OLS / WordPress” 二级菜单:
 #         1) 彻底移除本机 OLS (apt purge openlitespeed + lsphp83*，删除 /usr/local/lsws)
 #         2) 按 slug 清理某个站点 (删除 vhost + /var/www/<slug>)。
-# - 新增: “清理数据库 / Redis” 二级菜单:
+#   - 新增: “清理数据库 / Redis” 二级菜单:
 #         1) 清理数据库 (DROP DATABASE + DROP USER，需多次确认)
 #         2) 清理 Redis (按 DB index 执行 FLUSHDB，需双重确认 + YES)
-# - 调整: 内存不足提示整合进主菜单; 安装流程封装为 install_ols_wp_flow()。
+#   - 调整: 内存不足提示整合进主菜单; 安装流程封装为 install_ols_wp_flow()。
 
 RED="\033[31m"
 GREEN="\033[32m"
@@ -23,7 +29,7 @@ CYAN="\033[36m"
 BOLD="\033[1m"
 NC="\033[0m"
 
-SCRIPT_VERSION="0.8"
+SCRIPT_VERSION="0.9"
 
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -121,7 +127,8 @@ show_main_menu() {
     1) install_ols_wp_flow ;;
     2)
       log_warn "LNMP 一键模块尚未集成，请使用独立 LNMP 脚本。"
-      exit 0
+      read -rp "按回车返回主菜单..." _
+      show_main_menu
       ;;
     3) remove_ols_wp_menu ;;
     4) cleanup_db_redis_menu ;;
@@ -177,6 +184,7 @@ remove_ols_global() {
   read -rp "如需继续，请输入大写 'REMOVE_OLS' 确认: " c
   if [ "$c" != "REMOVE_OLS" ]; then
     log_warn "确认字符串不匹配，已取消。"
+    remove_ols_wp_menu
     return
   fi
 
@@ -199,8 +207,10 @@ remove_ols_global() {
     rm -rf /usr/local/lsws
   fi
 
-  log_info "本机 OLS 卸载流程已完成。如有残留，请手动检查 dpkg -l | grep openlitespeed。"
-  exit 0
+  log_info "本机 OLS 卸载流程已完成。"
+  read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
+  remove_ols_wp_menu
+  return
 }
 
 remove_wp_by_slug() {
@@ -209,6 +219,8 @@ remove_wp_by_slug() {
 
   if [ ! -d "$LSWS_ROOT" ] || [ ! -f "$HTTPD_CONF" ]; then
     log_error "未找到 ${LSWS_ROOT} 或 ${HTTPD_CONF}，似乎尚未安装 OLS。"
+    read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
+    remove_ols_wp_menu
     return
   fi
 
@@ -221,11 +233,15 @@ remove_wp_by_slug() {
   local slug slug2
   read -rp "请输入要清理的站点 slug（例如: ols 或 horizontech）: " slug
   if [ -z "$slug" ]; then
-    log_warn "slug 不能为空，已取消。"; return
+    log_warn "slug 不能为空，已取消。"
+    remove_ols_wp_menu
+    return
   fi
   read -rp "请再次输入 slug 确认: " slug2
   if [ "$slug" != "$slug2" ]; then
-    log_warn "两次 slug 不一致，已取消。"; return
+    log_warn "两次 slug 不一致，已取消。"
+    remove_ols_wp_menu
+    return
   fi
 
   local VH_CONF_DIR="${LSWS_ROOT}/conf/vhosts/${slug}"
@@ -239,7 +255,9 @@ remove_wp_by_slug() {
   local ok
   read -rp "如需继续，请输入大写 'YES': " ok
   if [ "$ok" != "YES" ]; then
-    log_warn "未输入 YES，已取消。"; return
+    log_warn "未输入 YES，已取消。"
+    remove_ols_wp_menu
+    return
   fi
 
   log_step "清理 virtualhost ${slug} 配置"
@@ -276,7 +294,9 @@ remove_wp_by_slug() {
   fi
 
   log_info "按 slug 清理站点完成。"
-  exit 0
+  read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
+  remove_ols_wp_menu
+  return
 }
 
 ##################################
@@ -311,6 +331,8 @@ cleanup_db_redis_menu() {
 cleanup_db_interactive() {
   if ! command -v mysql >/dev/null 2>&1; then
     log_error "未找到 mysql 命令，无法执行数据库清理。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
     return
   fi
 
@@ -326,17 +348,32 @@ cleanup_db_interactive() {
   DB_PORT="${DB_PORT:-3306}"
 
   read -rp "要删除的 DB 名称（例如: ols_wp）: " DB_NAME
-  if [ -z "$DB_NAME" ]; then log_warn "DB 名称不能为空。"; return; fi
+  if [ -z "$DB_NAME" ]; then
+    log_warn "DB 名称不能为空。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
+  fi
 
   read -rp "要删除的 DB 用户名（例如: ols_user）: " DB_USER
-  if [ -z "$DB_USER" ]; then log_warn "DB 用户名不能为空。"; return; fi
+  if [ -z "$DB_USER" ]; then
+    log_warn "DB 用户名不能为空。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
+  fi
 
   read -rp "用于执行 DROP 的管理账号（默认 root）: " ADMIN_USER
   ADMIN_USER="${ADMIN_USER:-root}"
 
   read -rsp "请输入管理账号密码（不会回显）: " ADMIN_PASS
   echo
-  if [ -z "$ADMIN_PASS" ]; then log_warn "管理账号密码不能为空。"; return; fi
+  if [ -z "$ADMIN_PASS" ]; then
+    log_warn "管理账号密码不能为空。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
+  fi
 
   echo
   echo "将要执行的大致 SQL："
@@ -347,12 +384,18 @@ cleanup_db_interactive() {
 
   read -rp "为确认操作，请再次输入 DB 名称 ($DB_NAME): " tmp
   if [ "$tmp" != "$DB_NAME" ]; then
-    log_warn "两次 DB 名称不一致，已取消。"; return
+    log_warn "两次 DB 名称不一致，已取消。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
   fi
 
   read -rp "如需继续，请输入大写 'YES': " tmp
   if [ "$tmp" != "YES" ]; then
-    log_warn "未输入 YES，已取消数据库清理。"; return
+    log_warn "未输入 YES，已取消数据库清理。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
   fi
 
   log_step "执行数据库清理: $DB_NAME / $DB_USER"
@@ -361,12 +404,16 @@ cleanup_db_interactive() {
     -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; DROP USER IF EXISTS '$DB_USER'@'%'; FLUSH PRIVILEGES;"
 
   log_info "数据库 $DB_NAME 与用户 $DB_USER 已尝试删除（如存在）。"
-  exit 0
+  read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+  cleanup_db_redis_menu
+  return
 }
 
 cleanup_redis_interactive() {
   if ! command -v redis-cli >/dev/null 2>&1; then
     log_error "未找到 redis-cli，无法执行 Redis 清理。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
     return
   fi
 
@@ -382,22 +429,39 @@ cleanup_redis_interactive() {
   RP="${RP:-6379}"
 
   read -rp "Redis DB index（例如: 1）: " RD
-  if [ -z "$RD" ]; then log_warn "Redis DB index 不能为空。"; return; fi
+  if [ -z "$RD" ]; then
+    log_warn "Redis DB index 不能为空。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
+  fi
 
   read -rp "请再次输入 Redis DB index 确认: " RD2
-  if [ "$RD" != "$RD2" ]; then log_warn "两次 DB index 不一致，已取消。"; return; fi
+  if [ "$RD" != "$RD2" ]; then
+    log_warn "两次 DB index 不一致，已取消。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
+  fi
 
   echo
   echo "将对 Redis ${RH}:${RP} 的 DB ${RD} 执行 FLUSHDB。"
   read -rp "如需继续，请输入大写 'YES': " tmp
-  if [ "$tmp" != "YES" ]; then log_warn "未输入 YES，已取消 Redis 清理。"; return; fi
+  if [ "$tmp" != "YES" ]; then
+    log_warn "未输入 YES，已取消 Redis 清理。"
+    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    cleanup_db_redis_menu
+    return
+  fi
 
   log_step "执行 Redis DB ${RD} 清空 (FLUSHDB)"
 
   redis-cli -h "$RH" -p "$RP" -n "$RD" FLUSHDB
 
   log_info "Redis DB ${RD} 已执行 FLUSHDB。"
-  exit 0
+  read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+  cleanup_db_redis_menu
+  return
 }
 
 #######################
@@ -813,8 +877,8 @@ print_summary() {
   echo "数据库主机:  ${DB_HOST}"
   echo "数据库名称:  ${DB_NAME}"
   echo "数据库用户:  ${DB_USER}"
-  echo "服务器 IPv4: ${SERVER_IPV4:-未知 / 可能在内网或被防火墙阻挡}" 
-  echo "服务器 IPv6: ${SERVER_IPV6:-未检测到}" 
+  echo "服务器 IPv4: ${SERVER_IPV4:-未知 / 可能在内网或被防火墙阻挡}"
+  echo "服务器 IPv6: ${SERVER_IPV6:-未检测到}"
   echo
   echo "请在域名 DNS / CDN 后台，将 ${SITE_DOMAIN} 的 A/AAAA 记录指向上述 IP。"
   echo "如使用严格 SSL 模式，请确保源站已正确配置证书，否则会出现 521。"
@@ -823,6 +887,7 @@ print_summary() {
   echo "  1) 在浏览器直接访问 http://${SITE_DOMAIN} 或 http://<服务器IP> 测试站点是否正常;"
   echo "  2) 确认云厂商安全组和本机防火墙均已放行 80/443;"
   echo "  3) 再在 CDN / 加速服务后台开启代理（橙云）和 HTTPS。"
+  echo
 }
 
 install_ols_wp_flow() {
@@ -838,7 +903,18 @@ install_ols_wp_flow() {
   env_self_check
   configure_ssl
   print_summary
-  exit 0
+
+  local opt
+  echo "-------------------------------------"
+  echo "  1) 返回主菜单"
+  echo "  0) 退出脚本"
+  echo "-------------------------------------"
+  read -rp "请输入选项 [0-1]: " opt
+  case "$opt" in
+    1) show_main_menu ;;
+    0) log_info "已退出脚本。"; exit 0 ;;
+    *) log_warn "输入无效，默认退出脚本。"; exit 0 ;;
+  esac
 }
 
 #######################
