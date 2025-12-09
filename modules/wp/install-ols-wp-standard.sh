@@ -2,7 +2,15 @@
 set -Eeo pipefail
 cd /
 
-# 颜色
+# install-ols-wp-standard.sh
+# Version: v0.7
+# 更新记录:
+# - 新增版本头注释，包含版本号与变更说明，方便在公共仓库中跟踪。
+# - 修正 listener map 顺序为 `map vhost domain`，避免命中默认站点导致 404。
+# - 数据库提示改为“必须与已创建的库/用户一致”，避免误以为可以随便填写。
+# - 新增 环境自检 步骤：检查 lsws 状态、本机 80/443 监听情况、ufw 防火墙状态，并提示云厂商后台需放行 80/443。
+# - 优化公网 IP 检测逻辑，尽量过滤内网 / Tailscale 网段，不再把 10.x 等地址当成公网 IP 打印。
+
 RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
@@ -132,7 +140,7 @@ prompt_site_info() {
       break
     fi
     log_warn "域名不能为空。"
-  done`
+  done
 
   read -rp "请输入站点 Slug（仅小写字母/数字，例如: ols，默认: 取域名第一个字段）: " SITE_SLUG
   if [ -z "$SITE_SLUG" ]; then
@@ -296,7 +304,7 @@ EOF
     log_info "vhost 配置文件已存在：${VH_CONF_FILE}"
   fi
 
-  # 配置 HTTP 监听器（80）
+  # 配置 HTTP 监听器（80），注意 map 写法：map vhost domain
   if ! grep -q "^listener http " "$HTTPD_CONF"; then
     cat >>"$HTTPD_CONF" <<EOF
 
@@ -341,6 +349,7 @@ download_wordpress() {
   fi
 
   mkdir -p "$DOC_ROOT"
+  local tmpdir
   tmpdir="$(mktemp -d)"
   pushd "$tmpdir" >/dev/null
 
@@ -386,9 +395,39 @@ generate_wp_config() {
   sed -i "s/password_here/${DB_PASSWORD}/" "$wp_config"
   sed -i "s/localhost/${DB_HOST}/" "$wp_config"
 
-  # 保留 WordPress 默认 salt 占位符；如需自动生成，可后续扩展。
-
   log_info "已根据输入生成 wp-config.php。"
+}
+
+env_self_check() {
+  log_step "环境自检（lsws 状态 / 端口 / 防火墙）"
+
+  echo "1) Web 服务进程状态"
+  if systemctl is-active --quiet lsws; then
+    log_info "lsws 服务状态：active (running)"
+  else
+    log_warn "lsws 服务当前不是 active。若访问异常，请先检查：systemctl status lsws"
+  fi
+
+  echo
+  echo "2) 本机监听端口（80 / 443）"
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntp | awk 'NR==1 || /:80 / || /:443 /'
+  else
+    netstat -lntp 2>/dev/null | awk 'NR==1 || /:80 / || /:443 /'
+  fi
+
+  if command -v ufw >/dev/null 2>&1; then
+    echo
+    echo "3) ufw 防火墙状态"
+    ufw status verbose || true
+  fi
+
+  echo
+  log_warn "排查 521 / 无法访问时建议顺序："
+  echo "  1) 确认本机有进程监听 80/443；"
+  echo "  2) 确认本机防火墙（如 ufw）放行 80/443；"
+  echo "  3) 确认云厂商控制台安全组 / 防火墙已放行 80/443 至本实例；"
+  echo "  4) 如使用 CDN / 加速服务，再确认其后台 SSL 模式与源站是否匹配。"
 }
 
 configure_ssl() {
@@ -397,8 +436,8 @@ configure_ssl() {
   local choice
   echo "请选择 HTTPS 方案："
   echo "  1) 暂不配置 SSL，仅使用 HTTP 80（适合先确认站点正常，再配置 HTTPS）"
-  echo "  2) 使用 Cloudflare Origin Certificate（手动粘贴证书和私钥）"
-  echo "  3) 使用 Let’s Encrypt 自动申请证书（需域名指向本机，且暂时设为 DNS only / 灰云）"
+  echo "  2) 使用 Origin Certificate（手动粘贴证书和私钥，例如某些加速服务的源站证书）"
+  echo "  3) 使用 Let’s Encrypt 自动申请证书（需域名指向本机，且暂时设为仅 DNS / 灰云）"
   echo
 
   read -rp "请输入数字 [1-3，默认: 1]: " choice
@@ -410,12 +449,12 @@ configure_ssl() {
   case "$choice" in
     1)
       log_warn "本次安装暂不配置 SSL，仅监听 80 端口。"
-      log_warn "如你在 Cloudflare 中使用 Full (strict)，请注意：源站无证书会导致 521。"
+      log_warn "如你在 CDN/加速服务后台使用严格模式（类似 Full(strict)），源站无证书会导致 521。"
       ;;
 
     2)
-      log_info "你选择 Cloudflare Origin Certificate。"
-      log_info "请先在 Cloudflare 为当前域名生成 Origin Certificate，复制证书和私钥。"
+      log_info "你选择手动粘贴 Origin Certificate。"
+      log_info "请先在加速服务后台为当前域名生成源站证书（Origin Certificate），复制证书和私钥。"
 
       local cert_file key_file
       read -rp "请输入证书保存路径（例如: /usr/local/lsws/conf/ssl/${SITE_SLUG}.cert.pem）: " cert_file
@@ -429,7 +468,7 @@ configure_ssl() {
       mkdir -p "$(dirname "$cert_file")"
 
       echo
-      echo "请粘贴 Cloudflare Origin Certificate 内容，结束后按 Ctrl+D："
+      echo "请粘贴 Origin Certificate 内容，结束后按 Ctrl+D："
       cat >"$cert_file"
       echo
       echo "请粘贴对应私钥内容，结束后按 Ctrl+D："
@@ -448,7 +487,7 @@ listener https {
   map                     ${SITE_SLUG} ${SITE_DOMAIN}
 }
 EOF
-        log_info "已创建 listener https 并配置 Cloudflare Origin 证书。"
+        log_info "已创建 listener https 并配置 Origin 证书。"
       else
         # 更新现有 https listener 的 keyFile / certFile
         awk -v keyf="${key_file}" -v certf="${cert_file}" '
@@ -496,7 +535,7 @@ EOF
       log_info "你选择使用 Let’s Encrypt 自动签发证书。"
       log_warn "请确保："
       log_warn "  - 域名 ${SITE_DOMAIN} 的 A/AAAA 记录已指向本机；"
-      log_warn "  - 当前在 Cloudflare 中，该域名记录已设为 DNS only（灰云）；"
+      log_warn "  - 当前在 DNS / 加速服务后台，该域名记录已设为仅 DNS（灰云）；"
       log_warn "  - 80 端口可从公网访问。"
 
       apt install -y certbot
@@ -609,7 +648,7 @@ print_summary() {
   if [ -n "$SERVER_IPV4" ]; then
     echo "  服务器 IPv4：${SERVER_IPV4}"
   else
-    echo "  服务器 IPv4：自动获取失败，请在面板或 cloud 控制台中查看。"
+    echo "  服务器 IPv4：自动获取失败，请在面板或云控制台中查看。"
   fi
   if [ -n "$SERVER_IPV6" ]; then
     echo "  服务器 IPv6：${SERVER_IPV6}"
@@ -621,7 +660,7 @@ print_summary() {
   echo "  1. 确认数据库实例中 ${DB_NAME} 已创建，并可从本机使用 ${DB_USER} 正常连接。"
   echo "  2. 确认域名 ${SITE_DOMAIN} 的 DNS A/AAAA 记录指向本机公网 IP。"
   echo "  3. 首次访问 WordPress 前台/后台，完成安装向导。"
-  echo "  4. 若在 Cloudflare 使用 Full (strict)，务必先在本机配置 SSL（本脚本 HTTPS 步骤）。"
+  echo "  4. 如使用 CDN/加速服务且开启严格模式，请确保本机已正确配置 SSL 证书。"
   echo
   echo -e "${GREEN}本模块执行结束，你可以：${NC}"
   echo "  - 直接按回车返回（如果是从主菜单调用，将返回上级菜单）；"
@@ -640,6 +679,7 @@ main() {
   setup_vhost_config
   download_wordpress
   generate_wp_config
+  env_self_check
   configure_ssl
   fix_permissions
   print_summary
