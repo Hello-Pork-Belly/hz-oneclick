@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # install-ols-wp-standard.sh
-# 版本: v0.3.0
+# 版本: v0.3.1
 #
 # 用途:
 #   - 在 Ubuntu 22.04 / 24.04 上部署单站点 OpenLiteSpeed + WordPress 标准站
@@ -218,7 +218,7 @@ collect_site_info_step() {
 
   # 域名
   while true; do
-    read -rp "请输入站点主域名（例如: ols.horizontech.page）: " WP_DOMAIN
+    read -rp "请输入站点主域名（例如: example.com）: " WP_DOMAIN
     if [ -n "$WP_DOMAIN" ]; then
       break
     fi
@@ -466,7 +466,7 @@ EOF
   restart_ols
 
   echo
-  echo -e "${GREEN}[完成] OLS + WordPress 标准安装完成（v0.3.0）。${NC}"
+  echo -e "${GREEN}[完成] OLS + WordPress 标准安装完成（v0.3.1）。${NC}"
   echo "====================== 安装总结 ======================"
   echo "  域名：       ${WP_DOMAIN}"
   echo "  slug：       ${WP_SLUG}"
@@ -502,7 +502,7 @@ main() {
 
   echo
   echo "===================================================="
-  echo "  OLS + WordPress 标准安装模块（v0.3.0）"
+  echo "  OLS + WordPress 标准安装模块（v0.3.1）"
   echo "  定位：简单、可重复、适合新手的一键标准安装"
   echo "===================================================="
 
