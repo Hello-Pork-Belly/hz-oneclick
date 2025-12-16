@@ -39,6 +39,7 @@ log_step()  { echo -e "\n${CYAN}==== $* ====${NC}\n"; }
 trap 'log_error "脚本执行中断（行号: $LINENO）。"; exit 1' ERR
 
 require_root() {
+  # [ANCHOR:ENV_PRECHECK]
   if [ "$(id -u)" -ne 0 ]; then
     log_error "请使用 root 运行本脚本。"
     exit 1
@@ -46,6 +47,7 @@ require_root() {
 }
 
 check_os() {
+  # [ANCHOR:ENV_PRECHECK]
   if [ -r /etc/os-release ]; then
     . /etc/os-release
     case "$ID" in
@@ -134,6 +136,7 @@ show_main_menu() {
     3) remove_ols_wp_menu ;;
     4) cleanup_db_redis_menu ;;
     0)
+      # [ANCHOR:EXIT]
       log_info "已退出脚本。"
       exit 0
       ;;
@@ -149,6 +152,7 @@ show_main_menu() {
 ################################
 
 remove_ols_wp_menu() {
+  # [ANCHOR:CLEANUP_MENU]
   echo -e "${YELLOW}[危险]${NC} 本菜单会在本机删除 OLS 或站点，请确认已备份。"
   echo
   echo "3) 清理本机 OLS / WordPress："
@@ -572,6 +576,7 @@ test_db_connection() {
 }
 
 install_packages() {
+  # [ANCHOR:INSTALL_OLS]
   log_step "安装 / 检查 OpenLiteSpeed 与 PHP 组件"
 
   apt update
@@ -584,6 +589,7 @@ install_packages() {
     log_info "检测到 openlitespeed 已安装，跳过。"
   fi
 
+  # [ANCHOR:INSTALL_PHP]
   if ! dpkg -l | grep -q '^ii[[:space:]]\+lsphp83[[:space:]]'; then
     log_info "安装 lsphp83 及常用扩展（common/mysql/opcache）..."
     apt install -y lsphp83 lsphp83-common lsphp83-mysql lsphp83-opcache
@@ -748,6 +754,7 @@ generate_wp_config() {
 }
 
 fix_permissions() {
+  # [ANCHOR:SET_PERMISSIONS]
   log_step "修复站点目录权限"
 
   local base="/var/www/${SITE_SLUG}"
@@ -775,6 +782,7 @@ env_self_check() {
   fi
 
   echo
+  # [ANCHOR:PORT_CHECK]
   echo "2) 本机监听端口（80 / 443）"
   if command -v ss >/dev/null 2>&1; then
     ss -lntp | awk 'NR==1 || /:80 / || /:443 /'
@@ -783,6 +791,7 @@ env_self_check() {
   fi
 
   if command -v ufw >/dev/null 2>&1; then
+    # [ANCHOR:UFW_CHECK]
     echo
     echo "3) ufw 防火墙状态"
     ufw status verbose || true
@@ -797,6 +806,7 @@ env_self_check() {
 }
 
 configure_ssl() {
+  # [ANCHOR:SSL_MENU]
   log_step "处理 SSL / HTTPS（可选）"
 
   local LSWS_ROOT="/usr/local/lsws"
@@ -866,6 +876,7 @@ EOF
       systemctl restart lsws
       ;;
     3)
+      # [ANCHOR:SSL_LE]
       log_info "你选择 Let’s Encrypt。请确保：域名 ${SITE_DOMAIN} 已指向本机，且 DNS 记录为灰云。"
       apt install -y certbot
       local email cert_path key_path
@@ -920,6 +931,7 @@ EOF
 }
 
 print_summary() {
+  # [ANCHOR:SUMMARY]
   _detect_public_ip
   echo
   echo -e "${BOLD}安装完成（v${SCRIPT_VERSION}）${NC}"
@@ -1003,4 +1015,5 @@ install_ols_wp_flow() {
 # 脚本入口            #
 #######################
 
+# [ANCHOR:ENTRYPOINT]
 show_main_menu
