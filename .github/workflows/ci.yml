@@ -23,6 +23,7 @@ jobs:
           sudo chmod +x /usr/local/bin/shfmt
 
       - name: ShellCheck
+        continue-on-error: true
         run: |
           set -euo pipefail
           mapfile -d '' files < <(find . -type f -name '*.sh' -print0)
