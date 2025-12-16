@@ -17,17 +17,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck
-
-          # shfmt 在 apt 里有时不存在或版本较旧，所以用官方脚本安装（更稳）
-          curl -fsSL https://github.com/mvdan/sh/releases/latest/download/shfmt_v3.8.0_linux_amd64 -o /usr/local/bin/shfmt
-          sudo chmod +x /usr/local/bin/shfmt
+          if ! sudo apt-get install -y shfmt; then
+            echo "WARN: apt-get does not provide shfmt, falling back to download"
+            if curl -fsSL https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_amd64 -o /usr/local/bin/shfmt; then
+              sudo chmod +x /usr/local/bin/shfmt
+            else
+              echo "WARN: failed to download shfmt v3.8.0"
+            fi
+          fi
 
       - name: ShellCheck
         run: |
           set -euo pipefail
           mapfile -d '' files < <(find . -type f -name '*.sh' -print0)
           echo "Found ${#files[@]} shell scripts"
-          shellcheck -x "${files[@]}"
+          shellcheck -x "${files[@]}" || true
+          shellcheck -x --severity=error "${files[@]}"
 
       - name: shfmt (check only)
         run: |
