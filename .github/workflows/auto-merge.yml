@@ -2,7 +2,11 @@ name: Auto-merge (bot PRs)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [synchronize, reopened, ready_for_review, labeled]
+
+concurrency:
+  group: auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   pull-requests: write
@@ -18,7 +22,50 @@ jobs:
     steps:
       - name: Enable auto-merge
         uses: peter-evans/enable-pull-request-automerge@v3
+        continue-on-error: true
         with:
           pull-request-number: ${{ github.event.pull_request.number }}
           merge-method: squash
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify auto-merge is enabled
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          owner="${GITHUB_REPOSITORY%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          query=$(cat <<'EOF'
+          query($owner:String!, $repo:String!, $number:Int!) {
+            repository(owner: $owner, name: $repo) {
+              pullRequest(number: $number) {
+                autoMergeRequest {
+                  enabledAt
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          payload=$(jq -n \
+            --arg query "$query" \
+            --arg owner "$owner" \
+            --arg repo "$repo" \
+            --argjson number "$PR_NUMBER" \
+            '{query: $query, variables: {owner: $owner, repo: $repo, number: $number}}')
+
+          response=$(curl -s \
+            -H "Authorization: bearer ${GITHUB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "$payload" \
+            https://api.github.com/graphql)
+
+          enabled_at=$(echo "$response" | jq -r '.data.repository.pullRequest.autoMergeRequest.enabledAt')
+
+          if [ "$enabled_at" = "null" ] || [ -z "$enabled_at" ]; then
+            echo "Auto-merge was not enabled. Response:"
+            echo "$response"
+            exit 1
+          fi
