@@ -12,7 +12,8 @@ jobs:
   enable-automerge:
     if: >
       github.event.pull_request.draft == false &&
-      contains(join(github.event.pull_request.labels.*.name, ','), 'automerge')
+      github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name &&
+      (startsWith(github.head_ref, 'codex/') || contains(join(github.event.pull_request.labels.*.name, ','), 'codex'))
     runs-on: ubuntu-latest
     steps:
       - name: Enable auto-merge
@@ -20,3 +21,4 @@ jobs:
         with:
           pull-request-number: ${{ github.event.pull_request.number }}
           merge-method: squash
+          token: ${{ secrets.GITHUB_TOKEN }}
