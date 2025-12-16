@@ -2,10 +2,10 @@ name: Auto-merge (bot PRs)
 
 on:
   pull_request:
-    types: [synchronize, reopened, ready_for_review, labeled]
+    types: [labeled]
 
 concurrency:
-  group: auto-merge-${{ github.event.pull_request.number }}
+  group: automerge-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -16,18 +16,34 @@ jobs:
   enable-automerge:
     if: >
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       (startsWith(github.head_ref, 'codex/') || contains(join(github.event.pull_request.labels.*.name, ','), 'codex'))
     runs-on: ubuntu-latest
     steps:
+      - name: Check if auto-merge already enabled
+        id: check-automerge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if gh pr view "$PR" -R "${{ github.repository }}" --json autoMergeRequest -q '.autoMergeRequest != null'; then
+            echo "Auto-merge already enabled."
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Enable auto-merge
+        if: steps.check-automerge.outputs.enabled == 'false'
         uses: peter-evans/enable-pull-request-automerge@v3
         continue-on-error: true
         with:
           pull-request-number: ${{ github.event.pull_request.number }}
           merge-method: squash
           token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Verify auto-merge is enabled
+        if: steps.check-automerge.outputs.enabled == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
