@@ -96,6 +96,7 @@ _detect_public_ip() {
 ########################
 
 show_main_menu() {
+  # [ANCHOR:MENU_MAIN]
   local ram
   ram="$(get_ram_mb)"
 
@@ -469,6 +470,7 @@ cleanup_redis_interactive() {
 #######################
 
 prompt_site_info() {
+  # [ANCHOR:SITE_INFO]
   echo
   echo "================ 站点基础信息 ================"
   while :; do
@@ -520,6 +522,7 @@ prompt_db_info() {
 
   # 密码需要输入两次确认，防止手滑
   while :; do
+    # [ANCHOR:READ_DB_PASSWORD]
     read -rsp "DB 密码（不会回显，请确保与该 DB 用户的真实密码一致）: " DB_PASSWORD
     echo
     if [ -z "$DB_PASSWORD" ]; then
@@ -689,6 +692,7 @@ EOF
 }
 
 download_wordpress() {
+  # [ANCHOR:DOWNLOAD_WORDPRESS]
   log_step "下载并部署 WordPress"
 
   if [ -f "${DOC_ROOT}/wp-config.php" ]; then
@@ -727,6 +731,7 @@ generate_wp_config() {
 
   [ -f "$sample" ] || { log_error "未找到 ${sample}，无法生成 wp-config.php。"; exit 1; }
 
+  # [ANCHOR:WRITE_WP_CONFIG]
   cp "$sample" "$wp_config"
 
   # 处理包含 & 或反斜杠等特殊字符的密码，避免被 sed 误替换
@@ -759,6 +764,7 @@ fix_permissions() {
 }
 
 env_self_check() {
+  # [ANCHOR:ENV_SELF_CHECK]
   log_step "环境自检（lsws 状态 / 端口 / 防火墙）"
 
   echo "1) Web 服务进程状态"
@@ -938,6 +944,7 @@ print_summary() {
 }
 
 install_ols_wp_flow() {
+  # [ANCHOR:INSTALL_FLOW]
   local opt
 
   require_root
