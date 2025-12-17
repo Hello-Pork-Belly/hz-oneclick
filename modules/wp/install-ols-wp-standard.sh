@@ -19,6 +19,7 @@ BASELINE_ORIGIN_LIB="${REPO_ROOT}/lib/baseline_origin.sh"
 BASELINE_PROXY_LIB="${REPO_ROOT}/lib/baseline_proxy.sh"
 BASELINE_WP_LIB="${REPO_ROOT}/lib/baseline_wp.sh"
 BASELINE_LSWS_LIB="${REPO_ROOT}/lib/baseline_lsws.sh"
+BASELINE_CACHE_LIB="${REPO_ROOT}/lib/baseline_cache.sh"
 
 cd /
 
@@ -97,6 +98,10 @@ fi
 if [ -r "$BASELINE_LSWS_LIB" ]; then
   # shellcheck source=/dev/null
   . "$BASELINE_LSWS_LIB"
+fi
+if [ -r "$BASELINE_CACHE_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$BASELINE_CACHE_LIB"
 fi
 
 : "${TIER_LITE:=lite}"
@@ -321,8 +326,9 @@ run_lomp_baseline_diagnostics() {
       echo "  6) Step20-8 TLS/CERT (SNI/SAN/chain/expiry)"
       echo "  7) Step20-9 WP/App (runtime + HTTP)"
       echo "  8) Step20-10 LSWS/OLS (service/port/config/logs)"
+      echo "  9) Step20-11 Cache/Redis/OPcache"
       echo "  0) Return to main menu"
-      read -rp "Choose [0-8]: " choice
+      read -rp "Choose [0-9]: " choice
     else
       echo "=== 基线诊断（Baseline） ==="
       echo "仅做连通性诊断，不会修改外部配置，也不会保存密码。"
@@ -335,8 +341,9 @@ run_lomp_baseline_diagnostics() {
       echo "  6) Step20-8 TLS/证书（SNI/SAN/链/到期）"
       echo "  7) Step20-9 WP/App（运行态 + HTTP）"
       echo "  8) Step20-10 LSWS/OLS（服务/端口/配置/日志）"
+      echo "  9) Step20-11 Cache/Redis/OPcache"
       echo "  0) 返回主菜单"
-      read -rp "请输入选项 [0-8]: " choice
+      read -rp "请输入选项 [0-9]: " choice
     fi
     echo
 
@@ -684,15 +691,67 @@ run_lomp_baseline_diagnostics() {
           read -rp "按回车返回 Baseline 菜单..." _
         fi
         ;;
+      9)
+        baseline_init
+        wp_path=""
+        redis_pass=""
+        if [ "$lang" = "en" ]; then
+          read -rp "Auto-detect WordPress path? [Y/n]: " auto_wp
+        else
+          read -rp "是否自动探测 WordPress 路径？[Y/n]: " auto_wp
+        fi
+        auto_wp="${auto_wp,,}"
+        if [[ "$auto_wp" =~ ^n ]]; then
+          if [ "$lang" = "en" ]; then
+            read -rp "Enter WordPress path (optional): " wp_path
+          else
+            read -rp "请输入 WordPress 路径（可留空）: " wp_path
+          fi
+          wp_path="${wp_path//[[:space:]]/}"
+        fi
+
+        if [ "$lang" = "en" ]; then
+          read -rp "Need Redis password? [y/N]: " need_redis_pass
+        else
+          read -rp "Redis 是否需要密码？[y/N]: " need_redis_pass
+        fi
+        need_redis_pass="${need_redis_pass,,}"
+        if [[ "$need_redis_pass" =~ ^y ]]; then
+          if [ "$lang" = "en" ]; then
+            read -srp "Enter Redis password (hidden, not stored): " redis_pass
+          else
+            read -srp "请输入 Redis 密码（不回显、不保存）: " redis_pass
+          fi
+          echo
+        fi
+
+        if declare -F baseline_cache_run >/dev/null 2>&1; then
+          baseline_cache_run "$wp_path" "$lang" "$redis_pass"
+        else
+          baseline_add_result "CACHE/REDIS" "CACHE_BASELINE" "WARN" "cache_module_missing" "baseline_cache.sh not loaded" ""
+        fi
+
+        baseline_print_summary
+        baseline_print_details
+        baseline_print_keywords
+
+        unset redis_pass
+        echo
+        if [ "$lang" = "en" ]; then
+          read -rp "Press Enter to return to Baseline menu..." _
+        else
+          read -rp "按回车返回 Baseline 菜单..." _
+        fi
+        ;;
       0)
         show_main_menu
         return
         ;;
       *)
         if [ "$lang" = "en" ]; then
-          log_warn "Invalid input, please choose 0-8."
+          log_warn "Invalid input, please choose 0-9."
         else
-          log_warn "无效输入，请选择 0-8。"
+          log_warn "无效输入，请选择 0-9。"
         fi
         ;;
     esac

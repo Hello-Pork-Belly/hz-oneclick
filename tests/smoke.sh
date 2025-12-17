@@ -120,6 +120,32 @@ else
   echo "[smoke] baseline_lsws libraries not found; skipping baseline_lsws smoke"
 fi
 
+echo "[smoke] baseline_cache diagnostics smoke"
+if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_cache.sh" ]; then
+  # shellcheck source=/dev/null
+  . ./lib/baseline.sh
+  # shellcheck source=/dev/null
+  . ./lib/baseline_cache.sh
+
+  tmp_wp="$(mktemp -d)"
+  mkdir -p "$tmp_wp/wp-content"
+  cat > "$tmp_wp/wp-config.php" <<'EOF'
+<?php
+define('WP_CACHE', true);
+define('WP_REDIS_HOST', '127.0.0.1');
+EOF
+  touch "$tmp_wp/wp-content/object-cache.php"
+
+  baseline_init
+  baseline_cache_run "$tmp_wp" "en"
+  cache_details="$(baseline_print_details)"
+  echo "$cache_details" | grep -q "Group: CACHE/REDIS"
+  echo "$cache_details" | grep -q "redis_service"
+  rm -rf "$tmp_wp"
+else
+  echo "[smoke] baseline_cache libraries not found; skipping baseline_cache smoke"
+fi
+
 echo "[smoke] baseline regression suite"
 bash tests/baseline_smoke.sh
 
