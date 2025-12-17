@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
+
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+if [[ "$SCRIPT_SOURCE" != /* ]]; then
+  SCRIPT_SOURCE="$(pwd)/${SCRIPT_SOURCE}"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+COMMON_LIB="${REPO_ROOT}/lib/common.sh"
+
 cd /
 
 # install-ols-wp-standard.sh
@@ -19,7 +29,7 @@ cd /
 #   - 新增: “清理数据库 / Redis” 二级菜单:
 #         1) 清理数据库 (DROP DATABASE + DROP USER，需多次确认)
 #         2) 清理 Redis (按 DB index 执行 FLUSHDB，需双重确认 + YES)
-#   - 调整: 内存不足提示整合进主菜单; 安装流程封装为 install_ols_wp_flow()。
+#   - 调整: 内存不足提示整合进主菜单; 安装流程封装为 install_lomp_flow()。
 
 RED="\033[31m"
 GREEN="\033[32m"
@@ -31,6 +41,50 @@ NC="\033[0m"
 
 SCRIPT_VERSION="0.9"
 POST_SUMMARY_SHOWN=0
+
+if [ -r "$COMMON_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$COMMON_LIB"
+fi
+
+: "${TIER_LITE:=lite}"
+: "${TIER_STANDARD:=standard}"
+: "${TIER_HUB:=hub}"
+
+if ! declare -f normalize_tier >/dev/null 2>&1; then
+  normalize_tier() {
+    local tier
+    tier="${1:-}"
+    tier="${tier,,}"
+
+    case "$tier" in
+      "$TIER_LITE"|"$TIER_STANDARD"|"$TIER_HUB")
+        printf "%s" "$tier"
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  }
+fi
+
+if ! declare -f is_valid_tier >/dev/null 2>&1; then
+  is_valid_tier() {
+    normalize_tier "$1" >/dev/null 2>&1
+  }
+fi
+
+get_default_lomp_tier() {
+  local normalized
+  normalized="$(normalize_tier "${TIER_STANDARD}")" || true
+  if [ -n "$normalized" ]; then
+    printf "%s" "$normalized"
+  else
+    printf "%s" "$TIER_STANDARD"
+  fi
+}
+
+LOMP_DEFAULT_TIER="$(get_default_lomp_tier)"
 
 log_info()  {
   # [ANCHOR:LOG_INFO]
@@ -230,13 +284,13 @@ show_main_menu() {
   echo
 
   case "$choice" in
-    1) install_ols_wp_flow ;;
+    1) install_lomp_flow ;;
     2)
       log_warn "LNMP 一键模块尚未集成，请使用独立 LNMP 脚本。"
       read -rp "按回车返回主菜单..." _
       show_main_menu
       ;;
-    3) remove_ols_wp_menu ;;
+    3) cleanup_lomp_menu ;;
     4) cleanup_db_redis_menu ;;
     0)
       # [ANCHOR:EXIT]
@@ -254,7 +308,7 @@ show_main_menu() {
 # 3: 清理本机 OLS / WordPress #
 ################################
 
-remove_ols_wp_menu() {
+cleanup_lomp_menu() {
   # [ANCHOR:CLEANUP_MENU]
   echo -e "${YELLOW}[危险]${NC} 本菜单会在本机删除 OLS 或站点，请确认已备份。"
   echo
@@ -293,7 +347,7 @@ remove_ols_global() {
   read -rp "如需继续，请输入大写 'REMOVE_OLS' 确认: " c
   if [ "$c" != "REMOVE_OLS" ]; then
     log_warn "确认字符串不匹配，已取消。"
-    remove_ols_wp_menu
+    cleanup_lomp_menu
     return
   fi
 
@@ -318,7 +372,7 @@ remove_ols_global() {
 
   log_info "本机 OLS 卸载流程已完成。"
   read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
-  remove_ols_wp_menu
+  cleanup_lomp_menu
   return
 }
 
@@ -330,7 +384,7 @@ remove_wp_by_slug() {
   if [ ! -d "$LSWS_ROOT" ] || [ ! -f "$HTTPD_CONF" ]; then
     log_error "未找到 ${LSWS_ROOT} 或 ${HTTPD_CONF}，似乎尚未安装 OLS。"
     read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
-    remove_ols_wp_menu
+    cleanup_lomp_menu
     return
   fi
 
@@ -344,13 +398,13 @@ remove_wp_by_slug() {
   read -rp "请输入要清理的站点 slug（例如: ols 或 horizontech）: " slug
   if [ -z "$slug" ]; then
     log_warn "slug 不能为空，已取消。"
-    remove_ols_wp_menu
+    cleanup_lomp_menu
     return
   fi
   read -rp "请再次输入 slug 确认: " slug2
   if [ "$slug" != "$slug2" ]; then
     log_warn "两次 slug 不一致，已取消。"
-    remove_ols_wp_menu
+    cleanup_lomp_menu
     return
   fi
 
@@ -366,7 +420,7 @@ remove_wp_by_slug() {
   read -rp "如需继续，请输入大写 'YES': " ok
   if [ "$ok" != "YES" ]; then
     log_warn "未输入 YES，已取消。"
-    remove_ols_wp_menu
+    cleanup_lomp_menu
     return
   fi
 
@@ -405,7 +459,7 @@ remove_wp_by_slug() {
 
   log_info "按 slug 清理站点完成。"
   read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
-  remove_ols_wp_menu
+  cleanup_lomp_menu
   return
 }
 
@@ -1071,9 +1125,15 @@ print_summary() {
   echo
 }
 
-install_ols_wp_flow() {
+install_lomp_flow() {
   # [ANCHOR:INSTALL_FLOW]
-  local opt
+  local opt lomp_tier
+
+  lomp_tier="$LOMP_DEFAULT_TIER"
+  if ! is_valid_tier "$lomp_tier"; then
+    log_error "内部档位标识无效，无法继续安装。"
+    exit 1
+  fi
 
   require_root
   check_os
