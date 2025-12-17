@@ -53,12 +53,12 @@ main_menu() {
       green "hz-oneclick - HorizonTech one-click installer (preview)"
       echo
       cyan  "Menu options"
-      cyan  "  1) Immich on Cloud (VPS / OCI)"
+      cyan  "  1) Immich on Cloud (VPS)"
       green "  2) rclone basics (OneDrive etc.)"
       cyan  "  3) Plex Media Server"
       green "  4) Transmission (BT download)"
       cyan  "  5) Tailscale access"
-      green "  6) Cloudflare Tunnel"
+      green "  6) Edge Tunnel / Reverse Proxy"
       cyan  "  7) msmtp + Brevo (SMTP alert)"
       green "  8) WP backup (DB + files)"
       cyan  "  9) wp-cron helper (system cron for WordPress)"
@@ -93,7 +93,7 @@ main_menu() {
           read -rp "Press Enter to return to menu..." _
           ;;
         6)
-          echo "Cloudflare Tunnel helper scripts are not ready yet (coming soon)..."
+          echo "Edge tunnel / reverse proxy helper scripts are not ready yet (coming soon)..."
           read -rp "Press Enter to return to menu..." _
           ;;
         7)
@@ -143,12 +143,12 @@ main_menu() {
       green "hz-oneclick - HorizonTech 一键安装入口（预览版）"
       echo
       cyan  "菜单选项 / Menu options"
-      cyan  "  1) Immich 上云（VPS / OCI）"
+      cyan  "  1) Immich 上云（VPS）"
       green "  2) rclone 基础安装（OneDrive 等）"
       cyan  "  3) Plex 媒体服务器"
       green "  4) Transmission BT 下载"
       cyan  "  5) Tailscale 接入"
-      green "  6) Cloudflare Tunnel 穿透"
+      green "  6) 反向代理/隧道穿透"
       cyan  "  7) 邮件报警（msmtp + Brevo）"
       green "  8) WordPress 备份（数据库 + 文件）"
       cyan  "  9) wp-cron 定时任务向导"
@@ -184,7 +184,7 @@ main_menu() {
           read -rp "按回车返回菜单..." _
           ;;
         6)
-          echo "Cloudflare Tunnel 辅助脚本暂未开放（敬请期待）..."
+          echo "反向代理/隧道辅助脚本暂未开放（敬请期待）..."
           read -rp "按回车返回菜单..." _
           ;;
         7)

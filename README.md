@@ -2,9 +2,9 @@
 
 HorizonTech 的一键安装脚本合集。
 
-> ⚠️ 重要说明  
-> 这些脚本目前 **只在 Oracle Cloud 免费 VPS（ARM / x86）+ Ubuntu 22.04 / 24.04 上做过测试**。  
-> 其它云厂商或发行版可能可以用，但需要你自己多做验证。  
+> ⚠️ 重要说明
+> 这些脚本目前 **主要在部分云供应商提供的免费 VPS（ARM / x86）+ Ubuntu 22.04 / 24.04 上做过测试**。
+> 其它平台或发行版可能可以用，但需要你自己多做验证。
 > **所有脚本都视为实验性质（Experimental），请在可回滚环境中使用，并自行做好备份。**
 
 ## 仓库定位
@@ -15,9 +15,9 @@ HorizonTech 的一键安装脚本合集。
 
 示例目标（规划中）：
 
-- Immich 部署到 VPS / OCI
+- Immich 部署到 VPS
 - rclone 网盘挂载（OneDrive 等）
-- Plex / Transmission / Tailscale / Cloudflare Tunnel 等常用组件
+- Plex / Transmission / Tailscale / 反向代理隧道等常用组件
 
 ## 预计使用方式（规划中）
 

@@ -3,6 +3,20 @@
 # Baseline "Quick Triage" orchestration (521/HTTPS/TLS first).
 # This file only defines functions and does not execute any logic on load.
 
+if ! declare -f baseline_sanitize_text >/dev/null 2>&1; then
+  if [ -r "$(dirname "${BASH_SOURCE[0]}")/baseline_common.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$(dirname "${BASH_SOURCE[0]}")/baseline_common.sh"
+  else
+    baseline_sanitize_text() {
+      sed -E \
+        -e 's/((authorization|token|password|secret|apikey|api_key)[[:space:]]*[:=][[:space:]]*).*/\1[REDACTED]/Ig' \
+        -e 's/((^|[[:space:]])key=)[^[:space:]]+/\1[REDACTED]/Ig' \
+        -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig'
+    }
+  fi
+fi
+
 baseline_triage__normalize_lang() {
   local lang
   lang="${1:-zh}"
@@ -53,9 +67,7 @@ baseline_triage__collect_keywords_line() {
 }
 
 baseline_triage__sanitize_text() {
-  # Redact common sensitive keys before writing to report/output.
-  # Matches token/authorization/password/secret/apikey patterns.
-  sed -E 's/((token|authorization|password|secret|apikey)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig'
+  baseline_sanitize_text
 }
 
 baseline_triage__first_issue_reason() {
