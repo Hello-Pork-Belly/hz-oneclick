@@ -42,6 +42,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 
 ## Baseline Quick Triage
 
-- 在「Baseline Diagnostics」菜单中新增了「Quick Triage (521/HTTPS/TLS) / 一键快排查（521/HTTPS/TLS）」入口，可一步串联 DNS/IP、Origin、防火墙、Proxy/CDN、TLS/HTTPS、LSWS/OLS、WP/App、Cache/Redis、DB、System 等检查。
-- 运行时会要求输入要诊断的域名，并可选择语言（en/zh）。脚本会输出 `VERDICT`/`KEY`/`REPORT` 行，并将完整报告写入 `/tmp/hz-baseline-triage-<domain>-<YYYYmmdd-HHMMSS>.txt`（例如：`/tmp/hz-baseline-triage-abc.yourdomain.com-20240101-120000.txt`）。
-- 需要求助时，请提供 `KEY:` 行和 `REPORT:` 路径，方便他人复现和定位，无需粘贴整份日志。
+- 直接运行：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh)`（可选语言 en/zh），按提示输入要诊断的域名（示例：`abc.yourdomain.com`）。
+- 终端会输出 `VERDICT:` / `KEY:` / `REPORT:` 行，完整报告会写到 `/tmp/` 目录，文件名带时间戳和域名（示例：`/tmp/hz-baseline-triage-abc.yourdomain.com-20240101-120000.txt`）。
+- 报告内容已脱敏，反馈问题时优先提供 `KEY:` 行以及 `REPORT:` 路径或内容，方便他人复现和定位，无需粘贴整份日志。

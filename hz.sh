@@ -64,6 +64,7 @@ main_menu() {
       cyan  "  9) wp-cron helper (system cron for WordPress)"
       green  " 10) rkhunter (rootkit / trojan scanner)"
       cyan  "  11) rkhunter (daily check / optional mail alert)"
+      green " 12) Quick Triage (521/HTTPS/TLS) - export report"
       yellow "  0) Exit"
       green "  r) Return to language selection / 返回语言选择 "
       echo
@@ -117,6 +118,11 @@ main_menu() {
           echo "rkhunter (setting / optional mail alert)) ..."
           bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/setup-rkhunter-cron-en.sh)
           ;;
+        12)
+          echo "Running Baseline Quick Triage (read-only checks)..."
+          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh)
+          read -rp "Done. Press Enter to return to menu..." _
+          ;;
         0)
           echo "Bye~"
           exit 0
@@ -148,7 +154,8 @@ main_menu() {
       cyan  "  9) wp-cron 定时任务向导"
       green "  10) rkhunter（系统后门 / 木马检测）"
       cyan  "  11) rkhunter 定时扫描(报错邮件通知 /日志维护）"
-      green "  12) ols-wp（ DB / redis 配置）"
+      green "  12) Quick Triage（优先排查 521/HTTPS/TLS）- 导出报告"
+      cyan  "  13) ols-wp（ DB / redis 配置）"
       yellow "  0) 退出"
       yellow "  r) 返回语言选择 / Return to language selection"
       echo
@@ -203,6 +210,11 @@ main_menu() {
           bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/setup-rkhunter-cron.sh)
           ;;
         12)
+          echo "将运行 Baseline Quick Triage（只读排查，自动生成报告）..."
+          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh)
+          read -rp "完成。按回车返回菜单..." _
+          ;;
+        13)
           echo "将安装OLS+WP （ DB/Redis ）..."
           bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/install-ols-wp-standard.sh)
           ;;

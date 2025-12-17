@@ -192,6 +192,23 @@ else
   echo "[smoke] baseline_triage libraries not found; skipping triage smoke"
 fi
 
+echo "[smoke] quick triage standalone runner"
+if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
+  triage_output="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh)"
+  echo "$triage_output" | grep -q "^VERDICT:"
+  echo "$triage_output" | grep -q "^KEY:"
+  echo "$triage_output" | grep -q "^REPORT:"
+  standalone_report="$(echo "$triage_output" | awk '/^REPORT:/ {print $2}')"
+  if [ -z "$standalone_report" ] || [ ! -f "$standalone_report" ]; then
+    echo "[smoke] standalone triage report missing" >&2
+    exit 1
+  fi
+  grep -q "HZ Quick Triage Report" "$standalone_report"
+  grep -q "Baseline Diagnostics Summary" "$standalone_report"
+else
+  echo "[smoke] quick triage runner not found; skipping"
+fi
+
 echo "[smoke] baseline regression suite"
 bash tests/baseline_smoke.sh
 

@@ -52,6 +52,12 @@ baseline_triage__collect_keywords_line() {
   fi
 }
 
+baseline_triage__sanitize_text() {
+  # Redact common sensitive keys before writing to report/output.
+  # Matches token/authorization/password/secret/apikey patterns.
+  sed -E 's/((token|authorization|password|secret|apikey)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig'
+}
+
 baseline_triage__first_issue_reason() {
   local target_status status idx total keyword id
   target_status="$1"
@@ -384,12 +390,16 @@ baseline_triage_run() {
   report_path="/tmp/hz-baseline-triage-${safe_domain}-${ts}.txt"
 
   header_text="=== HZ Quick Triage Report ===\nTIMESTAMP: ${ts}\nDOMAIN: ${domain}\nLANG: ${lang}\n"
+  umask 077
   {
     printf "%s\n\n" "$header_text"
     printf "%s\n\n" "$summary_output"
     printf "%s\n" "$details_output"
     printf "\n%s\n" "$key_line"
-  } > "$report_path"
+  } | baseline_triage__sanitize_text > "$report_path"
+  chmod 600 "$report_path" 2>/dev/null || true
+
+  key_line="$(printf "%s" "$key_line" | baseline_triage__sanitize_text)"
 
   if [ "$overall" = "PASS" ]; then
     echo "VERDICT: PASS (${verdict_reason})"
