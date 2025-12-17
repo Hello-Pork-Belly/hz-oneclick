@@ -1,0 +1,47 @@
+name: Regression Checks
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Bash syntax check (key scripts)
+        run: |
+          set -euo pipefail
+          bash -n modules/wp/install-ols-wp-standard.sh
+          bash -n hz.sh
+
+      - name: ShellCheck (key scripts)
+        run: |
+          set -euo pipefail
+          shellcheck -x modules/wp/install-ols-wp-standard.sh hz.sh
+
+      - name: Forbidden terms in user-facing output
+        run: |
+          set -euo pipefail
+          mapfile -t scripts < <(find . -type f -name '*.sh' -not -path './.git/*' -print)
+
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "No shell scripts detected; skipping forbidden term check."
+            exit 0
+          fi
+
+          if grep -nEi '(echo|printf).*?(oracle|aws|aliyun|tencent)' "${scripts[@]}"; then
+            echo "Forbidden cloud vendor names found in user-facing strings."
+            exit 1
+          else
+            echo "No forbidden cloud vendor names detected in user-facing strings."
+          fi
