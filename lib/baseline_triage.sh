@@ -17,6 +17,22 @@ if ! declare -f baseline_sanitize_text >/dev/null 2>&1; then
   fi
 fi
 
+if ! declare -f baseline_json_escape >/dev/null 2>&1; then
+  baseline_json_escape() {
+    local input escaped
+    input="$1"
+    escaped=$(printf '%s' "$input" | \
+      sed \
+        -e 's/\\/\\\\/g' \
+        -e 's/"/\\\"/g' \
+        -e 's/\r/\\r/g' \
+        -e 's/\t/\\t/g' | \
+      tr '\n' '\n')
+    escaped=$(printf '%s' "$escaped" | sed ':a;N;$!ba;s/\n/\\n/g')
+    printf '%s' "$escaped"
+  }
+fi
+
 baseline_triage__normalize_lang() {
   local lang
   lang="${1:-zh}"
@@ -25,6 +41,19 @@ baseline_triage__normalize_lang() {
   else
     echo "zh"
   fi
+}
+
+baseline_triage__normalize_format() {
+  local format
+  format="${1:-text}"
+  case "${format,,}" in
+    json)
+      echo "json"
+      ;;
+    *)
+      echo "text"
+      ;;
+  esac
 }
 
 baseline_triage__timestamp() {
@@ -66,6 +95,35 @@ baseline_triage__collect_keywords_line() {
   fi
 }
 
+baseline_triage__collect_keywords() {
+  local total idx keyword key_item
+  local -a keys=()
+  local -a key_items=()
+  declare -A seen=()
+
+  if ! declare -p BASELINE_RESULTS_STATUS >/dev/null 2>&1; then
+    baseline_init
+  fi
+
+  total=${#BASELINE_RESULTS_STATUS[@]}
+  for ((idx=0; idx<total; idx++)); do
+    keyword="${BASELINE_RESULTS_KEYWORD[idx]}"
+    if [ -z "$keyword" ]; then
+      continue
+    fi
+
+    read -r -a key_items <<< "$keyword"
+    for key_item in "${key_items[@]}"; do
+      if [ -n "$key_item" ] && [ -z "${seen[$key_item]+x}" ]; then
+        seen["$key_item"]=1
+        keys+=("$key_item")
+      fi
+    done
+  done
+
+  printf '%s\n' "${keys[@]}"
+}
+
 baseline_triage__sanitize_text() {
   baseline_sanitize_text
 }
@@ -94,6 +152,50 @@ baseline_triage__first_issue_reason() {
   done
 
   echo ""
+}
+
+baseline_triage__status_merge() {
+  local current incoming
+  current="${1:-PASS}"
+  incoming="${2:-PASS}"
+
+  if [ "$current" = "FAIL" ] || [ "$incoming" = "FAIL" ]; then
+    echo "FAIL"
+  elif [ "$current" = "WARN" ] || [ "$incoming" = "WARN" ]; then
+    echo "WARN"
+  else
+    echo "PASS"
+  fi
+}
+
+baseline_triage__group_key() {
+  local group_name
+  group_name="$1"
+  case "$group_name" in
+    "DNS/IP") echo "dns_ip" ;;
+    "ORIGIN/FW") echo "origin_firewall" ;;
+    "Proxy/CDN") echo "proxy_cdn" ;;
+    "TLS/CERT"|"HTTPS/521") echo "tls_https" ;;
+    "LSWS/OLS") echo "lsws_ols" ;;
+    "WP/APP") echo "wp_app" ;;
+    "CACHE/REDIS") echo "cache_redis" ;;
+    "SYSTEM/RESOURCE") echo "system_resource" ;;
+    *) echo "" ;;
+  esac
+}
+
+baseline_triage__json_array_from_lines() {
+  local data first=1 line escaped
+  data="$1"
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    escaped="$(baseline_json_escape "$line")"
+    if [ $first -eq 0 ]; then
+      printf ','
+    fi
+    printf '"%s"' "$escaped"
+    first=0
+  done <<< "$data"
 }
 
 baseline_triage__setup_test_mode() {
@@ -357,11 +459,108 @@ baseline_triage__run_groups() {
   fi
 }
 
+baseline_triage__write_json_report() {
+  local domain lang ts overall report_path
+  domain="$1"
+  lang="$2"
+  ts="$3"
+  overall="$4"
+  report_path="$5"
+
+  local keywords_json keywords_lines
+  local -a keywords=()
+  local -a groups_order=(dns_ip origin_firewall proxy_cdn tls_https lsws_ols wp_app cache_redis system_resource)
+  local total idx group key_name status keyword evidence suggestions evidence_fmt suggestions_fmt token ev_line sug_line
+  declare -A group_status=()
+  declare -A group_key_items=()
+  declare -A group_evidence=()
+  declare -A group_suggestions=()
+  declare -A seen_key_item=()
+  declare -A seen_evidence=()
+  declare -A seen_suggestion=()
+
+  keywords_lines="$(baseline_triage__collect_keywords)"
+
+  total=${#BASELINE_RESULTS_STATUS[@]}
+  for ((idx=0; idx<total; idx++)); do
+    group="${BASELINE_RESULTS_GROUP[idx]}"
+    key_name="$(baseline_triage__group_key "$group")"
+    if [ -z "$key_name" ]; then
+      continue
+    fi
+
+    status="${BASELINE_RESULTS_STATUS[idx]}"
+    keyword="${BASELINE_RESULTS_KEYWORD[idx]}"
+    evidence="${BASELINE_RESULTS_EVIDENCE[idx]}"
+    suggestions="${BASELINE_RESULTS_SUGGESTIONS[idx]}"
+
+    group_status[$key_name]="$(baseline_triage__status_merge "${group_status[$key_name]:-PASS}" "$status")"
+
+    read -r -a keywords <<< "$keyword"
+    for token in "${keywords[@]}"; do
+      [ -z "$token" ] && continue
+      if [ -z "${seen_key_item[${key_name}|${token}]+x}" ]; then
+        seen_key_item["${key_name}|${token}"]=1
+        group_key_items[$key_name]="${group_key_items[$key_name]:-}${token}$'\n'"
+      fi
+    done
+
+    evidence_fmt=${evidence//\\n/$'\n'}
+    while IFS= read -r ev_line; do
+      [ -z "$ev_line" ] && continue
+      ev_line="$(printf "%s" "$ev_line" | baseline_triage__sanitize_text)"
+      if [ -z "${seen_evidence[${key_name}|${ev_line}]+x}" ]; then
+        seen_evidence["${key_name}|${ev_line}"]=1
+        group_evidence[$key_name]="${group_evidence[$key_name]:-}${ev_line}$'\n'"
+      fi
+    done <<< "$evidence_fmt"
+
+    suggestions_fmt=${suggestions//\\n/$'\n'}
+    while IFS= read -r sug_line; do
+      [ -z "$sug_line" ] && continue
+      sug_line="$(printf "%s" "$sug_line" | baseline_triage__sanitize_text)"
+      if [ -z "${seen_suggestion[${key_name}|${sug_line}]+x}" ]; then
+        seen_suggestion["${key_name}|${sug_line}"]=1
+        group_suggestions[$key_name]="${group_suggestions[$key_name]:-}${sug_line}$'\n'"
+      fi
+    done <<< "$suggestions_fmt"
+  done
+
+  keywords_json="$(baseline_triage__json_array_from_lines "$keywords_lines")"
+
+  umask 077
+  {
+    printf '{\n'
+    printf '  "metadata": {"timestamp": "%s", "domain": "%s", "lang": "%s", "format_version": "1.0"},\n' \
+      "$(baseline_json_escape "$ts")" "$(baseline_json_escape "$domain")" "$(baseline_json_escape "$lang")"
+    printf '  "summary": {"verdict": "%s", "keywords": [%s]},\n' "$overall" "$keywords_json"
+    printf '  "groups": {\n'
+    for idx in "${!groups_order[@]}"; do
+      key_name="${groups_order[$idx]}"
+      status="${group_status[$key_name]:-PASS}"
+      key_line_json="$(baseline_triage__json_array_from_lines "${group_key_items[$key_name]:-}")"
+      evidence_json="$(baseline_triage__json_array_from_lines "${group_evidence[$key_name]:-}")"
+      suggestions_json="$(baseline_triage__json_array_from_lines "${group_suggestions[$key_name]:-}")"
+
+      printf '    "%s": {"group": "%s", "status": "%s", "key_items": [%s], "evidence": [%s], "suggestions": [%s]}' \
+        "$key_name" "$key_name" "$status" "$key_line_json" "$evidence_json" "$suggestions_json"
+      if [ "$idx" -lt $(( ${#groups_order[@]} - 1 )) ]; then
+        printf ','
+      fi
+      printf '\n'
+    done
+    printf '  }\n'
+    printf '}\n'
+  } > "$report_path"
+  chmod 600 "$report_path" 2>/dev/null || true
+}
+
 baseline_triage_run() {
-  # Usage: baseline_triage_run "<domain>" "<lang>"
-  local domain lang ts overall verdict_reason key_line report_path summary_output details_output header_text safe_domain
+  # Usage: baseline_triage_run "<domain>" "<lang>" "[format]"
+  local domain lang format ts overall verdict_reason key_line report_path report_json_path summary_output details_output header_text safe_domain
   domain="$1"
   lang="$(baseline_triage__normalize_lang "$2")"
+  format="$(baseline_triage__normalize_format "${3:-text}")"
 
   if [ -z "$domain" ]; then
     if [ "$lang" = "en" ]; then
@@ -413,6 +612,11 @@ baseline_triage_run() {
 
   key_line="$(printf "%s" "$key_line" | baseline_triage__sanitize_text)"
 
+  if [ "$format" = "json" ]; then
+    report_json_path="/tmp/hz-baseline-triage-${safe_domain}-${ts}.json"
+    baseline_triage__write_json_report "$domain" "$lang" "$ts" "$overall" "$report_json_path"
+  fi
+
   if [ "$overall" = "PASS" ]; then
     echo "VERDICT: PASS (${verdict_reason})"
   else
@@ -420,6 +624,9 @@ baseline_triage_run() {
   fi
   echo "$key_line"
   echo "REPORT: ${report_path}"
+  if [ "$format" = "json" ]; then
+    echo "REPORT_JSON: ${report_json_path}"
+  fi
 
   baseline_triage__teardown_test_mode
 }
