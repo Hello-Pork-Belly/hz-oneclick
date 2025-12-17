@@ -9,6 +9,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 COMMON_LIB="${REPO_ROOT}/lib/common.sh"
+# [ANCHOR:CH20_BASELINE_SOURCE]
+BASELINE_LIB="${REPO_ROOT}/lib/baseline.sh"
 
 cd /
 
@@ -42,6 +44,11 @@ POST_SUMMARY_SHOWN=0
 if [ -r "$COMMON_LIB" ]; then
   # shellcheck source=/dev/null
   . "$COMMON_LIB"
+fi
+
+if [ -r "$BASELINE_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$BASELINE_LIB"
 fi
 
 : "${TIER_LITE:=lite}"
@@ -207,6 +214,13 @@ EOF
     os_version="N/A"
   fi
   SYSTEM_OS_VERSION="$os_version"
+}
+
+# [ANCHOR:CH20_BASELINE_ENTRY]
+run_lomp_baseline_diagnostics() {
+  baseline_init
+
+  # TODO: Step20-2/3/4 will add baseline diagnostics items.
 }
 
 detect_public_ip() {
