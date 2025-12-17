@@ -90,7 +90,7 @@ rkhunter（Rootkit Hunter）用于扫描系统中常见的 rootkit / 木马 / �
 本向导将会执行：
   1) 通过 apt 安装或重新安装 rkhunter
   2) 执行一次 rkhunter --update 更新数据库
-  3) 执行一次 rkhunter --propupd 建立“基线”（记录当前系统文件状态）
+  3) 执行一次 rkhunter --propupd 建立"基线"（记录当前系统文件状态）
 
 不会执行：
   - 不修改数据库、不修改 WordPress 网站文件
@@ -257,8 +257,8 @@ rkhunter 已完成安装 / 初始化。
       * rkhunter --propupd
 
 说明：
-  - 目前仅完成“安装 + 建立基线”，尚未开启自动定时扫描。
-  - 后续建议通过“rkhunter 定时任务 + 邮件报警向导”来：
+  - 目前仅完成"安装 + 建立基线"，尚未开启自动定时扫描。
+  - 后续建议通过"rkhunter 定时任务 + 邮件报警向导"来：
       * 定期执行 rkhunter --update && rkhunter --check --sk
       * 仅在发现 WARNING / ERROR 时发送告警邮件（依赖 msmtp + Brevo）
       * 定期对 /var/log/rkhunter.log 做简单截断，避免日志无限增长
@@ -271,7 +271,7 @@ EOF
 
   echo "接下来你想要做什么？"
   echo "  1) 返回主菜单（不做后续配置）"
-  echo "  2) 立刻进入“rkhunter 定时任务 + 邮件报警向导”（需要脚本已在 hz-oneclick 中）"
+  echo "  2) 立刻进入\"rkhunter 定时任务 + 邮件报警向导\"（需要脚本已在 hz-oneclick 中）"
   echo "  0) 退出本向导"
 
   while true; do

@@ -92,7 +92,7 @@ read -rp "DB 名称（wp-config.php 中 DB_NAME）: " DB_NAME
 read -rp "DB 用户名（wp-config.php 中 DB_USER）: " DB_USER
 read -rsp "DB 密码（wp-config.php 中 DB_PASSWORD）: " DB_PASS
 echo
-echo "DB 主机请“原样输入” wp-config.php 中 DB_HOST，例如："
+echo "DB 主机请\"原样输入\" wp-config.php 中 DB_HOST，例如："
 echo "  127.0.0.1"
 echo "  127.0.0.1:3306"
 echo "脚本会自动拆分主机和端口，无需手动修改。"
@@ -182,7 +182,7 @@ fi
 #--------------------------------------------------
 echo
 echo "[6/7] 每日备份时间 / Daily backup time"
-echo "注意：这是“服务器时间”，大多数 VPS 上为 UTC。"
+echo "注意：这是\"服务器时间\"，大多数 VPS 上为 UTC。"
 echo "例如："
 echo "  填 03:30 → 每天 03:30 (UTC) 运行。"
 read -rp "每日备份时间 (HH:MM，24 小时制) [03:30] : " BACKUP_TIME
@@ -206,7 +206,7 @@ fi
 
 if [[ "$MSMTP_AVAILABLE" == "true" ]]; then
   echo "检测到系统已安装 msmtp，并存在 /etc/msmtprc 配置。"
-  echo "你可以为本站启用“备份失败时发送邮件报警”。"
+  echo "你可以为本站启用\"备份失败时发送邮件报警\"。"
   read -rp "是否启用邮件报警？[y/N] : " enable_alert
   if [[ "$enable_alert" =~ ^[Yy]$ ]]; then
     read -rp "报警接收邮箱 (alert email, 例如 you@example.com) : " ALERT_EMAIL_INPUT
@@ -218,7 +218,7 @@ else
   echo "建议先在 HorizonTech 一键入口主菜单中执行："
   echo "  7) 邮件报警（msmtp + Brevo）"
   echo "完成邮件发送配置后，再重新运行本备份向导。"
-  read -rp "仍然继续创建“无邮件报警”的备份脚本？[Y/n] : " cont
+  read -rp "仍然继续创建\"无邮件报警\"的备份脚本？[Y/n] : " cont
   if [[ "$cont" =~ ^[Nn]$ ]]; then
     echo "已取消安装 WordPress 备份模块。"
     exit 0

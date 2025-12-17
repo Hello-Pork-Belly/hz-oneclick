@@ -191,7 +191,7 @@ detect_state_step() {
 
   case "$STATE" in
     A)
-      info "检测结果：状态 A - 使用 WordPress 默认“伪 cron”。"
+      info "检测结果：状态 A - 使用 WordPress 默认\"伪 cron\"。"
       echo "  - wp-config.php 中未定义 DISABLE_WP_CRON"
       echo "  - systemd 中未发现 $timer_name 定时器"
       echo "说明：访问量较少时，某些定时任务可能长时间延迟执行。"

@@ -6,7 +6,7 @@
 # 功能：
 #   - 为 rkhunter 创建统一检查脚本（默认：/usr/local/bin/rkhunter-check.sh）
 #   - 创建 systemd service + timer（rkhunter-check.service / .timer）
-#   - 支持“仅日志”或“调用 send-alert-mail.sh 发邮件”两种模式
+#   - 支持"仅日志"或"调用 send-alert-mail.sh 发邮件"两种模式
 #   - 在每次检查后对 /var/log/rkhunter.log 做简单截断，防止无限增大
 #
 # 前置假设：
@@ -153,12 +153,12 @@ EOF
       esac
     done
   else
-    warn "未检测到 ${alert_script_path}，将默认采用“仅日志”模式。"
+    warn "未检测到 ${alert_script_path}，将默认采用\"仅日志\"模式。"
     cat <<EOF
 
 你可以：
   1) 继续配置，仅在本机日志中查看 rkhunter 结果（不发邮件）
-  2) 先退出，在 hz-oneclick 菜单 7 安装“邮件报警（msmtp + Brevo）”并配置好 send-alert-mail.sh 后再回来
+  2) 先退出，在 hz-oneclick 菜单 7 安装"邮件报警（msmtp + Brevo）"并配置好 send-alert-mail.sh 后再回来
   0) 退出
 
 EOF
@@ -385,7 +385,7 @@ step4_setup_systemd() {
   echo
   cat <<EOF
 说明：
-  - 定时任务使用的是系统“本地时间”（上面第一行）。
+  - 定时任务使用的是系统"本地时间"（上面第一行）。
   - 你可以选择每天固定时间执行，或按 12 小时 / 6 小时周期执行。
 
 请选择执行频率：

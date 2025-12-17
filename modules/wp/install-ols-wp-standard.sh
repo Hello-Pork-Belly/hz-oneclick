@@ -15,17 +15,17 @@ cd /
 # install-ols-wp-standard.sh
 # 更新记录:
 # - v0.9:
-#   - 完成“彻底移除本机 OLS”“按 slug 清理站点”后，不再直接退出脚本，
+#   - 完成"彻底移除本机 OLS""按 slug 清理站点"后，不再直接退出脚本，
 #     而是提示已完成并返回「清理本机 OLS / WordPress」菜单。
-#   - 完成“清理数据库 / Redis”后，不再直接退出脚本，而是返回「清理数据库 / Redis」菜单。
+#   - 完成"清理数据库 / Redis"后，不再直接退出脚本，而是返回「清理数据库 / Redis」菜单。
 #   - 安装流程完成后，在总结信息下方新增简单菜单：1) 返回主菜单  0) 退出脚本。
 # - v0.8:
 #   - 修复: 不再安装不存在的 lsphp83-xml / lsphp83-zip 包，避免 apt 报错中断。
 #   - 新增: 顶层主菜单 (0/1/2/3/4)，支持安装、LNMP 占位、本机 OLS/WordPress 清理、DB/Redis 清理。
-#   - 新增: “清理本机 OLS / WordPress” 二级菜单:
+#   - 新增: "清理本机 OLS / WordPress" 二级菜单:
 #         1) 彻底移除本机 OLS (apt purge openlitespeed + lsphp83*，删除 /usr/local/lsws)
 #         2) 按 slug 清理某个站点 (删除 vhost + /var/www/<slug>)。
-#   - 新增: “清理数据库 / Redis” 二级菜单:
+#   - 新增: "清理数据库 / Redis" 二级菜单:
 #         1) 清理数据库 (DROP DATABASE + DROP USER，需多次确认)
 #         2) 清理 Redis (按 DB index 执行 FLUSHDB，需双重确认 + YES)
 #   - 调整: 内存不足提示整合进主菜单; 安装流程封装为 install_lomp_flow()。
@@ -33,7 +33,6 @@ cd /
 RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
-BLUE="\033[34m"
 CYAN="\033[36m"
 BOLD="\033[1m"
 NC="\033[0m"
@@ -589,7 +588,7 @@ remove_ols_global() {
   fi
 
   log_info "本机 OLS 卸载流程已完成。"
-  read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
+  read -rp "按回车返回\"清理本机 OLS / WordPress\"菜单..." _
   cleanup_lomp_menu
   return
 }
@@ -601,7 +600,7 @@ remove_wp_by_slug() {
 
   if [ ! -d "$LSWS_ROOT" ] || [ ! -f "$HTTPD_CONF" ]; then
     log_error "未找到 ${LSWS_ROOT} 或 ${HTTPD_CONF}，似乎尚未安装 OLS。"
-    read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
+    read -rp "按回车返回\"清理本机 OLS / WordPress\"菜单..." _
     cleanup_lomp_menu
     return
   fi
@@ -676,7 +675,7 @@ remove_wp_by_slug() {
   fi
 
   log_info "按 slug 清理站点完成。"
-  read -rp "按回车返回“清理本机 OLS / WordPress”菜单..." _
+  read -rp "按回车返回\"清理本机 OLS / WordPress\"菜单..." _
   cleanup_lomp_menu
   return
 }
@@ -1200,7 +1199,7 @@ configure_ssl() {
   echo "请选择 HTTPS 方案："
   echo "  1) 暂不配置 SSL，仅使用 HTTP 80（推荐先确认站点正常）"
   echo "  2) 使用 Origin Certificate（手动粘贴证书和私钥）"
-  echo "  3) 使用 Let’s Encrypt 自动申请证书（需域名已指向本机，灰云）"
+  echo "  3) 使用 Let's Encrypt 自动申请证书（需域名已指向本机，灰云）"
   echo
 
   read -rp "请输入数字 [1-3，默认 1]: " choice
@@ -1263,13 +1262,13 @@ EOF
       ;;
     3)
       # [ANCHOR:SSL_LE]
-      log_info "你选择 Let’s Encrypt。请确保：域名 ${SITE_DOMAIN} 已指向本机，且 DNS 记录为灰云。"
+      log_info "你选择 Let's Encrypt。请确保：域名 ${SITE_DOMAIN} 已指向本机，且 DNS 记录为灰云。"
       apt install -y certbot
       local email cert_path key_path
-      read -rp "请输入用于 Let’s Encrypt 注册的邮箱: " email
+      read -rp "请输入用于 Let's Encrypt 注册的邮箱: " email
       if [ -z "$email" ]; then log_error "邮箱不能为空，跳过 SSL 配置。"; return; fi
       certbot certonly --webroot -w "$DOC_ROOT" -d "$SITE_DOMAIN" --agree-tos -m "$email" --non-interactive || {
-        log_error "Let’s Encrypt 申请失败，跳过 SSL 配置。"; return; }
+        log_error "Let's Encrypt 申请失败，跳过 SSL 配置。"; return; }
       cert_path="/etc/letsencrypt/live/${SITE_DOMAIN}/fullchain.pem"
       key_path="/etc/letsencrypt/live/${SITE_DOMAIN}/privkey.pem"
       if ! { [ -f "$cert_path" ] && [ -f "$key_path" ]; }; then
