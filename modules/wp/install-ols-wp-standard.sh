@@ -14,6 +14,7 @@ BASELINE_LIB="${REPO_ROOT}/lib/baseline.sh"
 BASELINE_HTTPS_LIB="${REPO_ROOT}/lib/baseline_https.sh"
 BASELINE_DB_LIB="${REPO_ROOT}/lib/baseline_db.sh"
 BASELINE_DNS_LIB="${REPO_ROOT}/lib/baseline_dns.sh"
+BASELINE_ORIGIN_LIB="${REPO_ROOT}/lib/baseline_origin.sh"
 
 cd /
 
@@ -67,6 +68,11 @@ fi
 if [ -r "$BASELINE_DNS_LIB" ]; then
   # shellcheck source=/dev/null
   . "$BASELINE_DNS_LIB"
+fi
+
+if [ -r "$BASELINE_ORIGIN_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$BASELINE_ORIGIN_LIB"
 fi
 
 : "${TIER_LITE:=lite}"
@@ -286,8 +292,9 @@ run_lomp_baseline_diagnostics() {
       echo "  1) HTTPS/521"
       echo "  2) DB"
       echo "  3) DNS/IP"
+      echo "  4) Origin/Firewall (ports/service/UFW)"
       echo "  0) Return to main menu"
-      read -rp "Choose [0-3]: " choice
+      read -rp "Choose [0-4]: " choice
     else
       echo "=== 基线诊断（Baseline） ==="
       echo "仅做连通性诊断，不会修改外部配置，也不会保存密码。"
@@ -295,8 +302,9 @@ run_lomp_baseline_diagnostics() {
       echo "  1) HTTPS/521"
       echo "  2) DB"
       echo "  3) DNS/IP"
+      echo "  4) Origin/Firewall（端口/服务/UFW）"
       echo "  0) 返回主菜单"
-      read -rp "请输入选项 [0-3]: " choice
+      read -rp "请输入选项 [0-4]: " choice
     fi
     echo
 
@@ -331,10 +339,10 @@ run_lomp_baseline_diagnostics() {
         baseline_https_run "$domain" "$lang"
 
         baseline_print_summary
-        baseline_print_details
-        baseline_print_keywords
+      baseline_print_details
+      baseline_print_keywords
 
-        echo
+      echo
         if [ "$lang" = "en" ]; then
           read -rp "Press Enter to return to Baseline menu..." _
         else
@@ -456,15 +464,49 @@ run_lomp_baseline_diagnostics() {
           read -rp "按回车返回 Baseline 菜单..." _
         fi
         ;;
+      4)
+        baseline_init
+        domain="${SITE_DOMAIN:-}"
+        if [ "$lang" = "en" ]; then
+          read -rp "Enter domain for Host header (optional, e.g., demo.example.com): " input_domain
+        else
+          read -rp "请输入 Host 头域名（可留空，例如 demo.example.com）: " input_domain
+        fi
+        input_domain="${input_domain//[[:space:]]/}"
+        if [ -n "$input_domain" ]; then
+          domain="$input_domain"
+        fi
+
+        if [ -n "$domain" ]; then
+          if [ "$lang" = "en" ]; then
+            echo "Target domain (Host header): ${domain}"
+          else
+            echo "诊断域名（Host 头）: ${domain}"
+          fi
+        fi
+
+        baseline_origin_run "$domain" "$lang"
+
+        baseline_print_summary
+        baseline_print_details
+        baseline_print_keywords
+
+        echo
+        if [ "$lang" = "en" ]; then
+          read -rp "Press Enter to return to Baseline menu..." _
+        else
+          read -rp "按回车返回 Baseline 菜单..." _
+        fi
+        ;;
       0)
         show_main_menu
         return
         ;;
       *)
         if [ "$lang" = "en" ]; then
-          log_warn "Invalid input, please choose 0-3."
+          log_warn "Invalid input, please choose 0-4."
         else
-          log_warn "无效输入，请选择 0-3。"
+          log_warn "无效输入，请选择 0-4。"
         fi
         ;;
     esac
