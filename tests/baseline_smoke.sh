@@ -28,6 +28,18 @@ if [ ! -r "${REPO_ROOT}/lib/baseline.sh" ]; then
   exit 0
 fi
 
+if [ -r "${REPO_ROOT}/lib/baseline_common.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${REPO_ROOT}/lib/baseline_common.sh"
+else
+  baseline_sanitize_text() {
+    sed -E \
+      -e 's/((authorization|token|password|secret|apikey|api_key)[[:space:]]*[:=][[:space:]]*).*/\1[REDACTED]/Ig' \
+      -e 's/((^|[[:space:]])key=)[^[:space:]]+/\1[REDACTED]/Ig' \
+      -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig'
+  }
+fi
+
 # shellcheck source=/dev/null
 . "${REPO_ROOT}/lib/baseline.sh"
 
@@ -77,6 +89,47 @@ if [ -r "${REPO_ROOT}/lib/baseline_sys.sh" ]; then
   # shellcheck source=/dev/null
   . "${REPO_ROOT}/lib/baseline_sys.sh"
 fi
+
+echo "[baseline-smoke] vendor-neutral wording check"
+search_paths=("${REPO_ROOT}/README.md" "${REPO_ROOT}/lib" "${REPO_ROOT}/modules" "${REPO_ROOT}/hz.sh")
+filtered_paths=()
+for path in "${search_paths[@]}"; do
+  if [ -e "$path" ]; then
+    filtered_paths+=("$path")
+  fi
+done
+
+forbidden_terms_b64=(
+  "Q2xvdWRmbGFyZQ=="
+  "T3JhY2xl"
+  "T0NJ"
+  "QVdT"
+  "R0NQ"
+  "QXp1cmU="
+)
+forbidden_terms=()
+for term_b64 in "${forbidden_terms_b64[@]}"; do
+  if decoded_term=$(printf '%s' "$term_b64" | base64 -d 2>/dev/null); then
+    forbidden_terms+=("$decoded_term")
+  fi
+done
+
+if [ ${#filtered_paths[@]} -gt 0 ] && [ ${#forbidden_terms[@]} -gt 0 ]; then
+  regex=$(IFS='|'; echo "${forbidden_terms[*]}")
+  if grep -RIn -Ei "$regex" "${filtered_paths[@]}"; then
+    echo "[baseline-smoke] vendor names should not appear in repository" >&2
+    exit 1
+  fi
+fi
+
+echo "[baseline-smoke] sanitization coverage"
+sanitize_input=$'Authorization: Bearer abc123\npassword=xyz\napi_key: token123\nquery key=value\nTOKEN=raw'
+sanitized_output="$(printf "%s" "$sanitize_input" | baseline_sanitize_text)"
+assert_not_contains "$sanitized_output" "abc123"
+assert_not_contains "$sanitized_output" "xyz"
+assert_not_contains "$sanitized_output" "token123"
+assert_not_contains "$sanitized_output" "key=value"
+assert_contains "$sanitized_output" "[REDACTED]"
 
 echo "[baseline-smoke] framework API availability"
 baseline_init

@@ -74,6 +74,7 @@ prompt_domain() {
 
 load_libs() {
   local libs=(
+    "lib/baseline_common.sh"
     "lib/baseline.sh"
     "lib/baseline_triage.sh"
     "lib/baseline_dns.sh"
@@ -96,7 +97,14 @@ load_libs() {
 }
 
 sanitize_output() {
-  sed -E 's/((token|authorization|password|secret|apikey)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig'
+  if declare -f baseline_sanitize_text >/dev/null 2>&1; then
+    baseline_sanitize_text
+  else
+    sed -E \
+      -e 's/((authorization|token|password|secret|apikey|api_key)[[:space:]]*[:=][[:space:]]*).*/\1[REDACTED]/Ig' \
+      -e 's/((^|[[:space:]])key=)[^[:space:]]+/\1[REDACTED]/Ig' \
+      -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig'
+  fi
 }
 
 run_triage() {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Baseline diagnostics for Proxy/CDN (Cloudflare-aware) group.
+# Baseline diagnostics for Proxy/CDN group.
 # This file only defines functions and does not execute any logic on load.
 
 baseline_proxy__extract_headers() {
@@ -144,8 +144,8 @@ baseline_proxy_run() {
         detect_suggestions="DNS 解析失败，请确认域名已正确解析后再进行代理/CDN 检查。"
       fi
     else
-      if echo "$headers_http" "$headers_https" | grep -Eqi 'server: *cloudflare|cf-ray|cf-cache-status'; then
-        detect_keyword="proxy_detected:cloudflare"
+      if echo "$headers_http" "$headers_https" | grep -Eqi 'server:[[:space:]]*cf|cf-ray|cf-cache-status'; then
+        detect_keyword="proxy_detected:cdn_headers"
         cf_detected=1
       elif echo "$headers_http" "$headers_https" | grep -Eqi '^via:|x-cache|x-served-by'; then
         detect_keyword="proxy_detected:generic"
@@ -297,9 +297,9 @@ SUG
 
     if [ $cf_detected -eq 1 ]; then
       if [ "$lang" = "en" ]; then
-        tls_suggestions+=$'\nCloudflare detected; align SSL/TLS mode (Flexible/Full/Strict) with origin certificate and firewall rules.'
+        tls_suggestions+=$'\nDetected proxy/CDN headers (e.g., cf-*); align TLS mode with the origin certificate and confirm firewall rules.'
       else
-        tls_suggestions+=$'\n检测到 Cloudflare，请在其控制台确认 SSL/TLS 模式（灵活/完全/严格）与回源证书、防火墙配置一致。'
+        tls_suggestions+=$'\n检测到代理/CDN 头（如 cf-*），请检查控制台的 TLS 模式与回源证书、防火墙配置一致。'
       fi
     elif [ $generic_detected -eq 1 ]; then
       if [ "$lang" = "en" ]; then

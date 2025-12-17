@@ -72,9 +72,9 @@ jobs:
             exit 0
           fi
 
-          if grep -nEi '(echo|printf).*?(oracle|aws|aliyun|tencent)' "${scripts[@]}"; then
-            echo "Forbidden cloud vendor names found in user-facing strings."
+          if grep -nEi '(echo|printf).*?(cloud provider|vendor)' "${scripts[@]}"; then
+            echo "Vendor-specific wording found in user-facing strings."
             exit 1
           else
-            echo "No forbidden cloud vendor names detected in user-facing strings."
+            echo "No vendor-specific wording detected in user-facing strings."
           fi

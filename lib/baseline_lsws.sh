@@ -2,9 +2,23 @@
 
 # Baseline diagnostics for LSWS/OLS service/ports/config/logs.
 
+if ! declare -f baseline_sanitize_text >/dev/null 2>&1; then
+  if [ -r "$(dirname "${BASH_SOURCE[0]}")/baseline_common.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$(dirname "${BASH_SOURCE[0]}")/baseline_common.sh"
+  else
+    baseline_sanitize_text() {
+      sed -E \
+        -e 's/((authorization|token|password|secret|apikey|api_key)[[:space:]]*[:=][[:space:]]*).*/\1[REDACTED]/Ig' \
+        -e 's/((^|[[:space:]])key=)[^[:space:]]+/\1[REDACTED]/Ig' \
+        -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig'
+    }
+  fi
+fi
+
 baseline_lsws__sanitize_log() {
   # Redact sensitive tokens from log snippets.
-  sed -E 's/(token|authorization|password|secret|apikey|key=)[^[:space:]]*/\1=***REDACTED***/Ig'
+  baseline_sanitize_text
 }
 
 baseline_lsws__tail_file() {
