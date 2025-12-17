@@ -13,7 +13,6 @@ COMMON_LIB="${REPO_ROOT}/lib/common.sh"
 cd /
 
 # install-ols-wp-standard.sh
-# Version: v0.9
 # 更新记录:
 # - v0.9:
 #   - 完成“彻底移除本机 OLS”“按 slug 清理站点”后，不再直接退出脚本，
@@ -39,7 +38,6 @@ CYAN="\033[36m"
 BOLD="\033[1m"
 NC="\033[0m"
 
-SCRIPT_VERSION="0.9"
 POST_SUMMARY_SHOWN=0
 
 if [ -r "$COMMON_LIB" ]; then
@@ -252,16 +250,16 @@ detect_recommended_tier() {
   if echo "$mem_mb" | grep -Eq '^[0-9]+$'; then
     if [ "$mem_mb" -lt 4000 ]; then
       tier="$TIER_LITE"
-      reason="内存 <4G，建议仅运行前端，数据库/Redis 外置更稳。"
-      next_step="优先通过内网或安全隧道连接外置数据库/Redis，确保前端性能。"
+      reason="内存 <4G，推荐 Lite（Frontend-only，仅部署前端），数据库/Redis 放到其他高配机器，通过内网或 Tailscale 等隧道访问。"
+      next_step="先准备可通过内网/隧道访问的数据库与 Redis，当前节点只跑前端，降低内存占用。"
     elif [ "$mem_mb" -lt 16000 ]; then
       tier="$TIER_STANDARD"
-      reason="内存 4G-<16G，可跑单站前后端，但数据库/Redis 外置更稳。"
-      next_step="如本机安装数据库/Redis，请注意监控占用；推荐放到其他机器以减少负载。"
+      reason="内存 4G-<16G，适合 Standard 档（前后端一体），也可外置数据库/Redis 提升稳定性。"
+      next_step="如需在本机跑数据库/Redis，请关注资源占用；更推荐放到同内网或隧道可达的专用机器。"
     else
       tier="$TIER_HUB"
-      reason="内存 ≥16G，可承担集中式 Hub（承载 DB/Redis）或标准前后端。"
-      next_step="如需集中管理多站点，可选择 Hub；只跑单站也可按需选择 Standard。"
+      reason="内存 ≥16G，可选择 Hub 档集中承载数据库/Redis，多站复用，也可按需跑 Standard。"
+      next_step="如计划集中管理多站点，可选 Hub 档并预留数据库/Redis 资源；单站需求也可保持 Standard。"
     fi
   else
     tier="N/A"
@@ -270,7 +268,7 @@ detect_recommended_tier() {
   fi
 
   case "$tier" in
-    "$TIER_LITE") tier_label="Lite" ;;
+    "$TIER_LITE") tier_label="Lite（Frontend-only）" ;;
     "$TIER_STANDARD") tier_label="Standard" ;;
     "$TIER_HUB") tier_label="Hub" ;;
     *) tier_label="N/A" ;;
@@ -335,6 +333,15 @@ print_system_summary() {
   echo "推荐档位: ${RECOMMENDED_TIER}"
   echo "原因: ${RECOMMENDED_REASON}"
   echo "下一步建议: ${RECOMMENDED_NEXT_STEP}"
+}
+
+show_lnmp_placeholder() {
+  local tier_label
+  tier_label="$1"
+  log_step "${tier_label} 档位（占位）"
+  log_warn "LNMP 档位暂未开放，目前仅提供提示，后续将补齐安装流程。"
+  read -rp "按回车返回主菜单..." _
+  show_main_menu
 }
 
 # 探测公网 IP（尽量避免 10.x / 内网）
@@ -463,47 +470,53 @@ show_main_menu() {
   ram="$(get_ram_mb)"
 
   echo
-  echo -e "${BOLD}== OLS + WordPress 标准模块 (v${SCRIPT_VERSION}) ==${NC}"
+  echo -e "${BOLD}== LOMP / LNMP 安装模块 ==${NC}"
   if [ "$ram" -gt 0 ]; then
     echo -e "当前检测到内存约: ${BOLD}${ram} MB${NC}"
     if [ "$ram" -lt 3800 ]; then
-      log_warn "当前机器内存 < 4G，强烈建议：数据库 / Redis 放在其他高配机器，本机只跑 OLS + WordPress 前端。"
+      log_warn "内存 < 4G，推荐选择 LOMP-Lite（Frontend-only），数据库/Redis 放到其他高配机器，通过内网或隧道访问。"
     else
-      log_info "内存 ≥ 4G，可作为前后端一体机或仅前端。"
+      log_info "内存 ≥ 4G，可按需选择 Lite（Frontend-only）、Standard 或 Hub。"
     fi
   fi
 
   print_system_summary
 
   echo
-  echo "请选择要执行的操作："
-  echo "  1) 安装 / 配置本机 OLS + WordPress（标准模式）"
-  echo "  2) 改为 LNMP（占位，目前仅提示）"
-  echo "  3) 清理本机 OLS / WordPress（危险操作，慎用）"
-  echo "  4) 清理数据库 / Redis（需在 DB/Redis 所在机器执行）"
+  echo "安装档位（LOMP / LNMP）："
+  echo "  1) LOMP-Lite（Frontend-only，仅部署前端，DB/Redis 外置）"
+  echo "  2) LOMP-Standard（前后端一体，含本地 DB/Redis）"
+  echo "  3) LOMP-Hub（集中式 Hub，当前为占位/仅提示）"
+  echo "  4) LNMP-Lite（占位/仅提示）"
+  echo "  5) LNMP-Standard（占位/仅提示）"
+  echo "  6) LNMP-Hub（占位/仅提示）"
+  echo
+  echo "维护 / 清理："
+  echo "  7) 清理本机 OLS / WordPress（危险操作，慎用）"
+  echo "  8) 清理数据库 / Redis（需在 DB/Redis 所在机器执行）"
   echo "  0) 退出脚本"
   echo
 
   local choice
-  read -rp "请输入选项 [0-4]: " choice
+  read -rp "请输入选项 [0-8]: " choice
   echo
 
   case "$choice" in
-    1) install_lomp_flow ;;
-    2)
-      log_warn "LNMP 一键模块尚未集成，请使用独立 LNMP 脚本。"
-      read -rp "按回车返回主菜单..." _
-      show_main_menu
-      ;;
-    3) cleanup_lomp_menu ;;
-    4) cleanup_db_redis_menu ;;
+    1) install_frontend_only_flow ;;
+    2) install_standard_flow ;;
+    3) install_hub_flow ;;
+    4) show_lnmp_placeholder "LNMP-Lite" ;;
+    5) show_lnmp_placeholder "LNMP-Standard" ;;
+    6) show_lnmp_placeholder "LNMP-Hub" ;;
+    7) cleanup_lomp_menu ;;
+    8) cleanup_db_redis_menu ;;
     0)
       # [ANCHOR:EXIT]
       log_info "已退出脚本。"
       exit 0
       ;;
     *)
-      log_warn "无效输入，请重新运行脚本并选择 0-4。"
+      log_warn "无效输入，请重新运行脚本并选择 0-8。"
       exit 1
       ;;
   esac
@@ -1309,7 +1322,7 @@ print_summary() {
   # [ANCHOR:SUMMARY]
   _detect_public_ip
   echo
-  echo -e "${BOLD}安装完成（v${SCRIPT_VERSION}）${NC}"
+  echo -e "${BOLD}安装完成${NC}"
   echo "====================================="
   echo "站点域名:    ${SITE_DOMAIN}"
   echo "站点 Slug:    ${SITE_SLUG}"
@@ -1423,8 +1436,10 @@ install_standard_flow() {
 
 install_hub_flow() {
   # [ANCHOR:INSTALL_FLOW_HUB]
-  log_step "Hub 档安装流程（占位）"
-  log_warn "Hub 档位安装流程尚未实现，敬请期待。"
+  log_step "LOMP-Hub 档安装流程（占位）"
+  log_warn "Hub 档位安装流程尚未实现，将在后续版本补齐集中式部署指引。"
+  read -rp "按回车返回主菜单..." _
+  show_main_menu
 }
 
 install_lomp_flow() {
