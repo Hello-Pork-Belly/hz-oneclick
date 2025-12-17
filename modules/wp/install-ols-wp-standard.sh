@@ -20,6 +20,7 @@ BASELINE_PROXY_LIB="${REPO_ROOT}/lib/baseline_proxy.sh"
 BASELINE_WP_LIB="${REPO_ROOT}/lib/baseline_wp.sh"
 BASELINE_LSWS_LIB="${REPO_ROOT}/lib/baseline_lsws.sh"
 BASELINE_CACHE_LIB="${REPO_ROOT}/lib/baseline_cache.sh"
+BASELINE_SYS_LIB="${REPO_ROOT}/lib/baseline_sys.sh"
 
 cd /
 
@@ -102,6 +103,10 @@ fi
 if [ -r "$BASELINE_CACHE_LIB" ]; then
   # shellcheck source=/dev/null
   . "$BASELINE_CACHE_LIB"
+fi
+if [ -r "$BASELINE_SYS_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$BASELINE_SYS_LIB"
 fi
 
 : "${TIER_LITE:=lite}"
@@ -327,8 +332,9 @@ run_lomp_baseline_diagnostics() {
       echo "  7) Step20-9 WP/App (runtime + HTTP)"
       echo "  8) Step20-10 LSWS/OLS (service/port/config/logs)"
       echo "  9) Step20-11 Cache/Redis/OPcache"
+      echo " 10) Step20-12 System/Resource (CPU/RAM/Disk/Swap/Logs)"
       echo "  0) Return to main menu"
-      read -rp "Choose [0-9]: " choice
+      read -rp "Choose [0-10]: " choice
     else
       echo "=== 基线诊断（Baseline） ==="
       echo "仅做连通性诊断，不会修改外部配置，也不会保存密码。"
@@ -342,8 +348,9 @@ run_lomp_baseline_diagnostics() {
       echo "  7) Step20-9 WP/App（运行态 + HTTP）"
       echo "  8) Step20-10 LSWS/OLS（服务/端口/配置/日志）"
       echo "  9) Step20-11 Cache/Redis/OPcache"
+      echo " 10) Step20-12 System/Resource（CPU/内存/磁盘/Swap/日志）"
       echo "  0) 返回主菜单"
-      read -rp "请输入选项 [0-9]: " choice
+      read -rp "请输入选项 [0-10]: " choice
     fi
     echo
 
@@ -743,15 +750,34 @@ run_lomp_baseline_diagnostics() {
           read -rp "按回车返回 Baseline 菜单..." _
         fi
         ;;
+      10)
+        baseline_init
+        if declare -F baseline_sys_run >/dev/null 2>&1; then
+          baseline_sys_run "$lang"
+        else
+          baseline_add_result "SYSTEM/RESOURCE" "SYS_BASELINE" "WARN" "module_missing" "baseline_sys.sh not loaded" ""
+        fi
+
+        baseline_print_summary
+        baseline_print_details
+        baseline_print_keywords
+
+        echo
+        if [ "$lang" = "en" ]; then
+          read -rp "Press Enter to return to Baseline menu..." _
+        else
+          read -rp "按回车返回 Baseline 菜单..." _
+        fi
+        ;;
       0)
         show_main_menu
         return
         ;;
       *)
         if [ "$lang" = "en" ]; then
-          log_warn "Invalid input, please choose 0-9."
+          log_warn "Invalid input, please choose 0-10."
         else
-          log_warn "无效输入，请选择 0-9。"
+          log_warn "无效输入，请选择 0-10。"
         fi
         ;;
     esac

@@ -73,6 +73,10 @@ if [ -r "${REPO_ROOT}/lib/baseline_cache.sh" ]; then
   # shellcheck source=/dev/null
   . "${REPO_ROOT}/lib/baseline_cache.sh"
 fi
+if [ -r "${REPO_ROOT}/lib/baseline_sys.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${REPO_ROOT}/lib/baseline_sys.sh"
+fi
 
 echo "[baseline-smoke] framework API availability"
 baseline_init
@@ -121,10 +125,13 @@ EOF
   baseline_cache_run "$tmp_wp" "en"
   rm -rf "$tmp_wp"
 fi
+if declare -F baseline_sys_run >/dev/null 2>&1; then
+  baseline_sys_run "en"
+fi
 
 summary_output="$(baseline_print_summary)"
 details_output="$(baseline_print_details)"
-for group in "HTTPS/521" "DB" "DNS/IP" "ORIGIN/FW" "Proxy/CDN" "TLS/CERT" "WP/APP" "LSWS/OLS" "CACHE/REDIS"; do
+for group in "HTTPS/521" "DB" "DNS/IP" "ORIGIN/FW" "Proxy/CDN" "TLS/CERT" "WP/APP" "LSWS/OLS" "CACHE/REDIS" "SYSTEM/RESOURCE"; do
   assert_contains "$summary_output" "$group"
 done
 assert_contains "$details_output" "Group: HTTPS/521"
@@ -145,6 +152,9 @@ assert_contains "$details_output" "Group: LSWS/OLS"
 assert_contains "$details_output" "lsws_active"
 assert_contains "$details_output" "Group: CACHE/REDIS"
 assert_contains "$details_output" "redis_"
+assert_contains "$details_output" "Group: SYSTEM/RESOURCE"
+assert_contains "$details_output" "KEY:DISK_USAGE_ROOT"
+assert_contains "$details_output" "KEY:LOAD1_PER_CORE"
 
 
 echo "[baseline-smoke] secrets leak guard"

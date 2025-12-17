@@ -146,6 +146,23 @@ else
   echo "[smoke] baseline_cache libraries not found; skipping baseline_cache smoke"
 fi
 
+echo "[smoke] baseline_sys diagnostics smoke"
+if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_sys.sh" ]; then
+  # shellcheck source=/dev/null
+  . ./lib/baseline.sh
+  # shellcheck source=/dev/null
+  . ./lib/baseline_sys.sh
+
+  baseline_init
+  baseline_sys_run "en"
+  sys_details="$(baseline_print_details)"
+  echo "$sys_details" | grep -q "Group: SYSTEM/RESOURCE"
+  echo "$sys_details" | grep -q "KEY:DISK_USAGE_ROOT"
+  echo "$sys_details" | grep -q "KEY:SWAP_PRESENT"
+else
+  echo "[smoke] baseline_sys libraries not found; skipping baseline_sys smoke"
+fi
+
 echo "[smoke] baseline regression suite"
 bash tests/baseline_smoke.sh
 
