@@ -68,6 +68,24 @@ else
   echo "[smoke] baseline_proxy libraries not found; skipping baseline_proxy smoke"
 fi
 
+echo "[smoke] baseline_tls diagnostics smoke"
+if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_tls.sh" ]; then
+  # shellcheck source=/dev/null
+  . ./lib/baseline.sh
+  # shellcheck source=/dev/null
+  . ./lib/baseline_tls.sh
+
+  baseline_init
+  baseline_tls_run "example.com" "en"
+  tls_summary="$(baseline_print_summary)"
+  tls_details="$(baseline_print_details)"
+  echo "$tls_summary" | grep -q "TLS/CERT"
+  echo "$tls_details" | grep -q "Group: TLS/CERT"
+  echo "$tls_details" | grep -q "CERT_EXPIRY"
+else
+  echo "[smoke] baseline_tls libraries not found; skipping baseline_tls smoke"
+fi
+
 echo "[smoke] baseline regression suite"
 bash tests/baseline_smoke.sh
 
