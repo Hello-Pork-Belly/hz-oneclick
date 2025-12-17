@@ -13,18 +13,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install ShellCheck (robust)
+      - name: Install ShellCheck (reliable)
+        id: shellcheck
+        shell: bash
         run: |
-          set -euo pipefail
-          sudo apt-get -o Acquire::Retries=3 update || true
-          sudo apt-get -o Acquire::Retries=3 install -y shellcheck || true
+          set -u
+          installed=false
 
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            echo "apt install shellcheck failed; falling back to snap..."
-            sudo snap install shellcheck
+          if command -v shellcheck >/dev/null 2>&1; then
+            installed=true
+          else
+            echo "Trying apt-get install shellcheck..."
+            if sudo apt-get -o Acquire::Retries=3 update && sudo apt-get -o Acquire::Retries=3 install -y shellcheck; then
+              installed=true
+            else
+              echo "apt-get failed; trying GitHub release binary..."
+              SC_VER="v0.10.0"
+              ARCHIVE="shellcheck-${SC_VER}.linux.x86_64.tar.xz"
+              URL="https://github.com/koalaman/shellcheck/releases/download/${SC_VER}/${ARCHIVE}"
+
+              tmpdir="$(mktemp -d)"
+              if curl -fsSL "$URL" -o "${tmpdir}/${ARCHIVE}" && tar -C "$tmpdir" -xf "${tmpdir}/${ARCHIVE}"; then
+                if [ -f "${tmpdir}/shellcheck-${SC_VER}/shellcheck" ]; then
+                  sudo install -m 0755 "${tmpdir}/shellcheck-${SC_VER}/shellcheck" /usr/local/bin/shellcheck
+                  installed=true
+                fi
+              fi
+              rm -rf "$tmpdir"
+            fi
           fi
 
-          shellcheck --version
+          echo "installed=${installed}" >> "$GITHUB_OUTPUT"
+          if [ "$installed" = "true" ]; then
+            shellcheck --version
+          else
+            echo "ShellCheck unavailable; skipping."
+          fi
 
       - name: Bash syntax check (key scripts)
         run: |
@@ -33,6 +57,7 @@ jobs:
           bash -n hz.sh
 
       - name: ShellCheck (key scripts)
+        if: steps.shellcheck.outputs.installed == 'true'
         run: |
           set -euo pipefail
           shellcheck -x modules/wp/install-ols-wp-standard.sh hz.sh
