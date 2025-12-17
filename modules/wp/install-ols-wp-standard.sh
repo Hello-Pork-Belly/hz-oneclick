@@ -134,6 +134,192 @@ get_ram_mb() {
   awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0
 }
 
+detect_system_profile() {
+  local arch vcpu mem_kb mem_mb mem_gb disk_total_raw disk_avail_raw os_version
+
+  arch="$(uname -m 2>/dev/null || true)"
+  if [ -z "$arch" ]; then
+    arch="N/A"
+  fi
+
+  if command -v nproc >/dev/null 2>&1; then
+    vcpu="$(nproc 2>/dev/null || true)"
+  fi
+  if ! echo "$vcpu" | grep -Eq '^[0-9]+$'; then
+    vcpu="$(lscpu 2>/dev/null | awk -F: '/^CPU\(s\)/{gsub(/ /,"",$2); print $2}' | head -n1)"
+  fi
+  if ! echo "$vcpu" | grep -Eq '^[0-9]+$'; then
+    vcpu="N/A"
+  fi
+
+  mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  if echo "$mem_kb" | grep -Eq '^[0-9]+$'; then
+    mem_mb=$((mem_kb / 1024))
+    mem_gb="$(awk -v kb="$mem_kb" 'BEGIN {printf "%.1f", kb/1024/1024}')"
+  else
+    mem_mb="N/A"
+    mem_gb="N/A"
+  fi
+
+  if command -v df >/dev/null 2>&1; then
+    read -r disk_total_raw disk_avail_raw <<EOF
+$(df -B1 / 2>/dev/null | awk 'NR==2 {print $2, $4}')
+EOF
+  fi
+
+  if echo "$disk_total_raw" | grep -Eq '^[0-9]+$'; then
+    SYSTEM_DISK_TOTAL="$(awk -v b="$disk_total_raw" 'BEGIN {printf "%.1f GB", b/1024/1024/1024}')"
+  else
+    SYSTEM_DISK_TOTAL="N/A"
+  fi
+
+  if echo "$disk_avail_raw" | grep -Eq '^[0-9]+$'; then
+    SYSTEM_DISK_AVAILABLE="$(awk -v b="$disk_avail_raw" 'BEGIN {printf "%.1f GB", b/1024/1024/1024}')"
+  else
+    SYSTEM_DISK_AVAILABLE="N/A"
+  fi
+
+  SYSTEM_ARCH="$arch"
+  SYSTEM_VCPU="$vcpu"
+  SYSTEM_MEM_MB="$mem_mb"
+  SYSTEM_MEM_GB="$mem_gb"
+
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    os_version="${VERSION_ID:-${PRETTY_NAME:-}}"
+  fi
+  if [ -z "$os_version" ]; then
+    os_version="N/A"
+  fi
+  SYSTEM_OS_VERSION="$os_version"
+}
+
+detect_public_ip() {
+  local ipv4 ipv6
+
+  ipv4="$(curl -fsS4 --max-time 3 https://api.ipify.org 2>/dev/null || curl -fsS4 --max-time 3 https://ifconfig.me 2>/dev/null || true)"
+  ipv4="$(echo "$ipv4" | tr -d ' \t\r\n')"
+  if ! echo "$ipv4" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    if command -v ip >/dev/null 2>&1; then
+      ipv4="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+    fi
+  fi
+  if ! echo "$ipv4" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    ipv4="N/A"
+  fi
+
+  ipv6="$(curl -fsS6 --max-time 3 https://api64.ipify.org 2>/dev/null || curl -fsS6 --max-time 3 https://ifconfig.me 2>/dev/null || true)"
+  ipv6="$(echo "$ipv6" | tr -d ' \t\r\n')"
+  if ! echo "$ipv6" | grep -qiE '^[0-9a-f:]+$'; then
+    if command -v ip >/dev/null 2>&1; then
+      ipv6="$(ip -6 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+    fi
+  fi
+  if ! echo "$ipv6" | grep -qiE '^[0-9a-f:]+$'; then
+    ipv6="N/A"
+  fi
+
+  DETECTED_IPV4="$ipv4"
+  DETECTED_IPV6="$ipv6"
+}
+
+detect_recommended_tier() {
+  local mem_mb tier reason next_step tier_label
+
+  mem_mb="$SYSTEM_MEM_MB"
+  if ! echo "$mem_mb" | grep -Eq '^[0-9]+$'; then
+    mem_mb="$(get_ram_mb)"
+  fi
+
+  if echo "$mem_mb" | grep -Eq '^[0-9]+$'; then
+    if [ "$mem_mb" -lt 4000 ]; then
+      tier="$TIER_LITE"
+      reason="内存 <4G，建议仅运行前端，数据库/Redis 外置更稳。"
+      next_step="优先通过内网或安全隧道连接外置数据库/Redis，确保前端性能。"
+    elif [ "$mem_mb" -lt 16000 ]; then
+      tier="$TIER_STANDARD"
+      reason="内存 4G-<16G，可跑单站前后端，但数据库/Redis 外置更稳。"
+      next_step="如本机安装数据库/Redis，请注意监控占用；推荐放到其他机器以减少负载。"
+    else
+      tier="$TIER_HUB"
+      reason="内存 ≥16G，可承担集中式 Hub（承载 DB/Redis）或标准前后端。"
+      next_step="如需集中管理多站点，可选择 Hub；只跑单站也可按需选择 Standard。"
+    fi
+  else
+    tier="N/A"
+    reason="未能识别内存容量，无法推荐档位。"
+    next_step="可手动检查 /proc/meminfo 或 free -m，确认后再选择安装方案。"
+  fi
+
+  case "$tier" in
+    "$TIER_LITE") tier_label="Lite" ;;
+    "$TIER_STANDARD") tier_label="Standard" ;;
+    "$TIER_HUB") tier_label="Hub" ;;
+    *) tier_label="N/A" ;;
+  esac
+
+  RECOMMENDED_TIER="$tier_label"
+  RECOMMENDED_REASON="$reason"
+  RECOMMENDED_NEXT_STEP="$next_step"
+}
+
+print_system_summary() {
+  detect_system_profile
+  detect_public_ip
+  detect_recommended_tier
+
+  local arch_display vcpu_display mem_display disk_display os_display ipv4_display ipv6_display
+
+  arch_display="$SYSTEM_ARCH"
+  vcpu_display="$SYSTEM_VCPU"
+  mem_display="${SYSTEM_MEM_MB} MB / ${SYSTEM_MEM_GB} GB"
+  disk_display="总计 ${SYSTEM_DISK_TOTAL} / 可用 ${SYSTEM_DISK_AVAILABLE}"
+  os_display="$SYSTEM_OS_VERSION"
+
+  if [ "$arch_display" = "N/A" ]; then
+    arch_display="N/A（可用 uname -m 手动查询）"
+  fi
+  if [ "$vcpu_display" = "N/A" ]; then
+    vcpu_display="N/A（可用 nproc 手动查询）"
+  fi
+  if echo "$mem_display" | grep -q 'N/A'; then
+    mem_display="N/A（可查看 /proc/meminfo 或 free -m）"
+  fi
+  if echo "$disk_display" | grep -q 'N/A'; then
+    disk_display="N/A（可用 df -h / 手动查询）"
+  fi
+  if [ -z "$os_display" ] || [ "$os_display" = "N/A" ]; then
+    os_display="N/A（可查看 /etc/os-release）"
+  fi
+
+  ipv4_display="$DETECTED_IPV4"
+  ipv6_display="$DETECTED_IPV6"
+  if [ "$ipv4_display" = "N/A" ]; then
+    ipv4_display="N/A（可使用 curl -4 ifconfig.me 手动查询）"
+  fi
+  if [ "$ipv6_display" = "N/A" ]; then
+    ipv6_display="N/A（可使用 curl -6 ifconfig.me 手动查询）"
+  fi
+
+  echo -e "${CYAN}---- 机器摘要 ----${NC}"
+  echo "CPU 架构: ${arch_display}"
+  echo "vCPU 核心: ${vcpu_display}"
+  echo "内存总量: ${mem_display}"
+  echo "磁盘: ${disk_display}"
+  echo "系统版本: ${os_display}"
+
+  echo -e "${CYAN}---- 网络摘要 ----${NC}"
+  echo "公网 IPv4: ${ipv4_display}"
+  echo "公网 IPv6: ${ipv6_display}"
+  echo "提示：如需绑定域名请配置 A/AAAA 记录指向上述公网 IP。"
+
+  echo -e "${CYAN}---- 建议结论 ----${NC}"
+  echo "推荐档位: ${RECOMMENDED_TIER}"
+  echo "原因: ${RECOMMENDED_REASON}"
+  echo "下一步建议: ${RECOMMENDED_NEXT_STEP}"
+}
+
 # 探测公网 IP（尽量避免 10.x / 内网）
 _detect_public_ip() {
   # [ANCHOR:DETECT_PUBLIC_IP]
@@ -269,6 +455,8 @@ show_main_menu() {
       log_info "内存 ≥ 4G，可作为前后端一体机或仅前端。"
     fi
   fi
+
+  print_system_summary
 
   echo
   echo "请选择要执行的操作："
