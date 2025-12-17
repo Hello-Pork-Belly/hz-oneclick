@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+forbidden_terms_b64=(
+  "Q2xvdWRmbGFyZQ=="
+  "T3JhY2xl"
+  "T0NJ"
+  "QVdT"
+  "R0NQ"
+  "QXp1cmU="
+)
+forbidden_terms=()
+for term_b64 in "${forbidden_terms_b64[@]}"; do
+  if decoded_term=$(printf '%s' "$term_b64" | base64 -d 2>/dev/null); then
+    forbidden_terms+=("$decoded_term")
+  fi
+done
+
 echo "[smoke] collecting shell scripts (excluding modules/)"
 mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './modules/*' -print0)
 
@@ -200,6 +215,26 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
   fi
   grep -q "HZ Quick Triage Report" "$report_path"
   grep -q "Baseline Diagnostics Summary" "$report_path"
+
+  triage_json_output="$( ( BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" "json" ) )"
+  echo "$triage_json_output" | grep -q "^REPORT_JSON:"
+  json_report_path="$(echo "$triage_json_output" | awk '/^REPORT_JSON:/ {print $2}')"
+  if [ -z "$json_report_path" ] || [ ! -f "$json_report_path" ]; then
+    echo "[smoke] triage JSON report not generated" >&2
+    exit 1
+  fi
+  head -n1 "$json_report_path" | grep -q "^{"
+  grep -q '"metadata"' "$json_report_path"
+  grep -q '"summary"' "$json_report_path"
+  grep -q '"groups"' "$json_report_path"
+
+  if [ ${#forbidden_terms[@]} -gt 0 ]; then
+    regex=$(IFS='|'; echo "${forbidden_terms[*]}")
+    if grep -Eiq "$regex" "$json_report_path"; then
+      echo "[smoke] forbidden vendor terms found in triage JSON" >&2
+      exit 1
+    fi
+  fi
 else
   echo "[smoke] baseline_triage libraries not found; skipping triage smoke"
 fi
@@ -217,6 +252,23 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
   fi
   grep -q "HZ Quick Triage Report" "$standalone_report"
   grep -q "Baseline Diagnostics Summary" "$standalone_report"
+
+  triage_output_json="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --format json)"
+  echo "$triage_output_json" | grep -q "^REPORT_JSON:"
+  standalone_json_report="$(echo "$triage_output_json" | awk '/^REPORT_JSON:/ {print $2}')"
+  if [ -z "$standalone_json_report" ] || [ ! -f "$standalone_json_report" ]; then
+    echo "[smoke] standalone triage JSON report missing" >&2
+    exit 1
+  fi
+  head -n1 "$standalone_json_report" | grep -q "^{"
+  grep -q '"summary"' "$standalone_json_report"
+  if [ ${#forbidden_terms[@]} -gt 0 ]; then
+    regex=$(IFS='|'; echo "${forbidden_terms[*]}")
+    if grep -Eiq "$regex" "$standalone_json_report"; then
+      echo "[smoke] forbidden vendor terms found in quick-triage JSON" >&2
+      exit 1
+    fi
+  fi
 else
   echo "[smoke] quick triage runner not found; skipping"
 fi

@@ -18,6 +18,66 @@ baseline_wrapper_normalize_lang() {
   fi
 }
 
+baseline_wrapper_parse_inputs() {
+  # Usage: baseline_wrapper_parse_inputs domain_ref lang_ref format_ref -- "$@"
+  local -n _bw_domain_ref=$1
+  local -n _bw_lang_ref=$2
+  local -n _bw_format_ref=$3
+  shift 3
+
+  local lang_set=0
+
+  _bw_domain_ref="${_bw_domain_ref:-${HZ_BASELINE_DOMAIN:-}}"
+  _bw_lang_ref="${_bw_lang_ref:-${HZ_BASELINE_LANG:-${HZ_LANG:-zh}}}"
+  _bw_format_ref="${_bw_format_ref:-${HZ_BASELINE_FORMAT:-text}}"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format)
+        _bw_format_ref="${2:-$_bw_format_ref}"
+        shift 2
+        ;;
+      --format=*)
+        _bw_format_ref="${1#--format=}"
+        shift
+        ;;
+      --)
+        shift
+        continue
+        ;;
+      --help)
+        echo "Usage: $0 [domain] [lang] [--format text|json]" >&2
+        exit 0
+        ;;
+      *)
+        if [ -z "$_bw_domain_ref" ]; then
+          _bw_domain_ref="$1"
+        elif [ $lang_set -eq 0 ]; then
+          _bw_lang_ref="$1"
+          lang_set=1
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  _bw_lang_ref="$(baseline_wrapper_normalize_lang "$_bw_lang_ref")"
+  _bw_format_ref="$(baseline_wrapper_normalize_format "$_bw_format_ref")"
+}
+
+baseline_wrapper_normalize_format() {
+  local format
+  format="${1:-text}"
+  case "${format,,}" in
+    json)
+      echo "json"
+      ;;
+    *)
+      echo "text"
+      ;;
+  esac
+}
+
 baseline_wrapper_load_libs() {
   local repo_root required libs_missing=()
   repo_root="$1"
@@ -67,6 +127,62 @@ baseline_wrapper_collect_keywords_line() {
   else
     echo "KEY: ${keys[*]}"
   fi
+}
+
+baseline_wrapper_collect_keywords() {
+  local total idx keyword key_item
+  local -a keys=()
+  local -a key_items=()
+  local -A seen=()
+
+  if ! declare -p BASELINE_RESULTS_STATUS >/dev/null 2>&1; then
+    baseline_init
+  fi
+
+  total=${#BASELINE_RESULTS_STATUS[@]}
+  for ((idx=0; idx<total; idx++)); do
+    keyword="${BASELINE_RESULTS_KEYWORD[idx]}"
+    if [ -z "$keyword" ]; then
+      continue
+    fi
+    read -r -a key_items <<< "$keyword"
+    for key_item in "${key_items[@]}"; do
+      if [ -n "$key_item" ] && [ -z "${seen[$key_item]+x}" ]; then
+        seen["$key_item"]=1
+        keys+=("$key_item")
+      fi
+    done
+  done
+
+  printf '%s\n' "${keys[@]}"
+}
+
+baseline_wrapper_status_merge() {
+  local current incoming
+  current="${1:-PASS}"
+  incoming="${2:-PASS}"
+
+  if [ "$current" = "FAIL" ] || [ "$incoming" = "FAIL" ]; then
+    echo "FAIL"
+  elif [ "$current" = "WARN" ] || [ "$incoming" = "WARN" ]; then
+    echo "WARN"
+  else
+    echo "PASS"
+  fi
+}
+
+baseline_wrapper_json_array_from_lines() {
+  local data first=1 line escaped
+  data="$1"
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    escaped="$(baseline_json_escape "$line")"
+    if [ $first -eq 0 ]; then
+      printf ','
+    fi
+    printf '"%s"' "$escaped"
+    first=0
+  done <<< "$data"
 }
 
 baseline_wrapper_first_reason() {
@@ -161,10 +277,11 @@ baseline_wrapper_print_verdict() {
 }
 
 baseline_wrapper_finalize() {
-  local group domain lang summary_output details_output key_line overall reason report_path
+  local group domain lang format summary_output details_output key_line overall reason report_path
   group="$1"
   domain="$2"
   lang="$3"
+  format="$(baseline_wrapper_normalize_format "${4:-text}")"
 
   summary_output="$(baseline_print_summary)"
   details_output="$(baseline_print_details)"
@@ -187,6 +304,66 @@ baseline_wrapper_finalize() {
   esac
 
   report_path="$(baseline_wrapper_write_report "$group" "$domain" "$lang" "$summary_output" "$details_output" "$key_line")"
+
+  if [ "$format" = "json" ]; then
+    local total idx status keyword evidence suggestions evidence_fmt suggestions_fmt
+    local key_line_json evidence_json suggestions_json
+    local -A seen_key=() seen_ev=() seen_sug=()
+    local -a key_items=() evidence_lines=() suggestion_lines=()
+    local group_status="PASS"
+
+    total=${#BASELINE_RESULTS_STATUS[@]}
+    for ((idx=0; idx<total; idx++)); do
+      if [ "${BASELINE_RESULTS_GROUP[idx]}" != "$group" ]; then
+        continue
+      fi
+
+      status="${BASELINE_RESULTS_STATUS[idx]}"
+      keyword="${BASELINE_RESULTS_KEYWORD[idx]}"
+      evidence="${BASELINE_RESULTS_EVIDENCE[idx]}"
+      suggestions="${BASELINE_RESULTS_SUGGESTIONS[idx]}"
+
+      group_status="$(baseline_wrapper_status_merge "$group_status" "$status")"
+
+      read -r -a key_split <<< "$keyword"
+      for keyword in "${key_split[@]}"; do
+        [ -z "$keyword" ] && continue
+        if [ -z "${seen_key[$keyword]+x}" ]; then
+          seen_key[$keyword]=1
+          key_items+=("$keyword")
+        fi
+      done
+
+      evidence_fmt=${evidence//\\n/$'\n'}
+      while IFS= read -r evidence; do
+        [ -z "$evidence" ] && continue
+        evidence="$(printf "%s" "$evidence" | baseline_sanitize_text)"
+        if [ -z "${seen_ev[$evidence]+x}" ]; then
+          seen_ev[$evidence]=1
+          evidence_lines+=("$evidence")
+        fi
+      done <<< "$evidence_fmt"
+
+      suggestions_fmt=${suggestions//\\n/$'\n'}
+      while IFS= read -r suggestions; do
+        [ -z "$suggestions" ] && continue
+        suggestions="$(printf "%s" "$suggestions" | baseline_sanitize_text)"
+        if [ -z "${seen_sug[$suggestions]+x}" ]; then
+          seen_sug[$suggestions]=1
+          suggestion_lines+=("$suggestions")
+        fi
+      done <<< "$suggestions_fmt"
+    done
+
+    key_line_json="$(baseline_wrapper_json_array_from_lines "$(printf '%s\n' "${key_items[@]}")")"
+    evidence_json="$(baseline_wrapper_json_array_from_lines "$(printf '%s\n' "${evidence_lines[@]}")")"
+    suggestions_json="$(baseline_wrapper_json_array_from_lines "$(printf '%s\n' "${suggestion_lines[@]}")")"
+
+    printf '{"group": "%s", "status": "%s", "key_items": [%s], "evidence": [%s], "suggestions": [%s]}' \
+      "$group" "$group_status" "$key_line_json" "$evidence_json" "$suggestions_json"
+    echo
+    return
+  fi
 
   printf "%s\n\n%s\n%s\n" "$summary_output" "$details_output" "$key_line"
   baseline_wrapper_print_verdict "$overall" "$reason" "$key_line" "$report_path"

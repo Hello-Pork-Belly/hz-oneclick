@@ -6,6 +6,7 @@ HZ_TRIAGE_TMP="$(mktemp -d /tmp/hz-oneclick-triage-XXXXXX)"
 HZ_TRIAGE_KEEP_TMP="${HZ_TRIAGE_KEEP_TMP:-0}"
 HZ_TRIAGE_USE_LOCAL="${HZ_TRIAGE_USE_LOCAL:-0}"
 HZ_TRIAGE_LOCAL_ROOT="${HZ_TRIAGE_LOCAL_ROOT:-$(pwd)}"
+HZ_TRIAGE_FORMAT="${HZ_TRIAGE_FORMAT:-text}"
 
 if [ "${HZ_TRIAGE_TEST_MODE:-0}" = "1" ] && [ "${BASELINE_TEST_MODE:-0}" != "1" ]; then
   BASELINE_TEST_MODE=1
@@ -107,14 +108,38 @@ sanitize_output() {
   fi
 }
 
+parse_args() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format)
+        HZ_TRIAGE_FORMAT="${2:-$HZ_TRIAGE_FORMAT}"
+        shift 2
+        ;;
+      --format=*)
+        HZ_TRIAGE_FORMAT="${1#--format=}"
+        shift
+        ;;
+      --help)
+        echo "Usage: $0 [--format text|json]"
+        exit 0
+        ;;
+      *)
+        # Ignore unknown args for forward compatibility
+        shift
+        ;;
+    esac
+  done
+}
+
 run_triage() {
-  local lang domain output report_path sanitized_output
+  local lang domain format output report_path sanitized_output
   lang="$1"
   domain="$2"
+  format="$3"
 
   BASELINE_WP_NO_PROMPT=1 export BASELINE_WP_NO_PROMPT
 
-  output="$(baseline_triage_run "$domain" "$lang")"
+  output="$(baseline_triage_run "$domain" "$lang" "$format")"
   sanitized_output="$(printf "%s" "$output" | sanitize_output)"
   echo "$sanitized_output"
 
@@ -134,13 +159,15 @@ main() {
   info "Bootstrapping quick triage runner (read-only checks)"
   load_libs
 
+  parse_args "$@"
+
   local lang domain
   lang="$(prompt_lang)"
   echo
   domain="$(prompt_domain "$lang")"
   echo
 
-  run_triage "$lang" "$domain"
+  run_triage "$lang" "$domain" "$HZ_TRIAGE_FORMAT"
 }
 
 main "$@"

@@ -45,6 +45,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 - 直接运行：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh)`（可选语言 en/zh），按提示输入要诊断的域名（示例：`abc.yourdomain.com`）。
 - 终端会输出 `VERDICT:` / `KEY:` / `REPORT:` 行，完整报告会写到 `/tmp/` 目录，文件名带时间戳和域名（示例：`/tmp/hz-baseline-triage-abc.yourdomain.com-20240101-120000.txt`）。
 - 报告内容已脱敏，反馈问题时优先提供 `KEY:` 行以及 `REPORT:` 路径或内容，方便他人复现和定位，无需粘贴整份日志。
+- 需要机器可读的结果时，追加 `--format json`（保持默认的人类可读输出不变）：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh) --format json
+```
+
+- JSON 模式会同时生成文本报告和 JSON 报告（同目录、文件名带 `.json`），末尾输出四行摘要，便于 CI 或日志采集解析：
+  - `VERDICT: <PASS|WARN|FAIL>`
+  - `KEY: <关键词列表>`
+  - `REPORT: <文本报告路径>`
+  - `REPORT_JSON: <JSON 报告路径>`
+- JSON 与文本报告同样经过脱敏处理，措辞保持供应商中立（以 `abc.yourdomain.com` 等占位符为例）。
 
 ## Baseline Diagnostics 菜单入口
 
