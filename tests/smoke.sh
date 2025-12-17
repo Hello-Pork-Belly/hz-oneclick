@@ -49,6 +49,25 @@ else
   echo "[smoke] baseline_origin libraries not found; skipping baseline_origin smoke"
 fi
 
+echo "[smoke] baseline_proxy diagnostics smoke"
+if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_proxy.sh" ]; then
+  # shellcheck source=/dev/null
+  . ./lib/baseline.sh
+  # shellcheck source=/dev/null
+  . ./lib/baseline_proxy.sh
+
+  baseline_init
+  baseline_proxy_run "example.com" "en"
+  proxy_summary="$(baseline_print_summary)"
+  proxy_details="$(baseline_print_details)"
+  echo "$proxy_summary" | grep -q "Proxy/CDN"
+  echo "$proxy_details" | grep -q "Group: Proxy/CDN"
+  echo "$proxy_details" | grep -q "Evidence:"
+  echo "$proxy_details" | grep -q "Suggestions:"
+else
+  echo "[smoke] baseline_proxy libraries not found; skipping baseline_proxy smoke"
+fi
+
 echo "[smoke] baseline regression suite"
 bash tests/baseline_smoke.sh
 

@@ -51,6 +51,11 @@ if [ -r "${REPO_ROOT}/lib/baseline_origin.sh" ]; then
   . "${REPO_ROOT}/lib/baseline_origin.sh"
 fi
 
+if [ -r "${REPO_ROOT}/lib/baseline_proxy.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${REPO_ROOT}/lib/baseline_proxy.sh"
+fi
+
 echo "[baseline-smoke] framework API availability"
 baseline_init
 baseline_add_result "FRAMEWORK" "HELLO" "PASS" "KW_HELLO" "evidence-line" "suggestion-line"
@@ -76,10 +81,13 @@ fi
 if declare -F baseline_origin_run >/dev/null 2>&1; then
   baseline_origin_run "abc.yourdomain.com" "en"
 fi
+if declare -F baseline_proxy_run >/dev/null 2>&1; then
+  baseline_proxy_run "example.com" "en"
+fi
 
 summary_output="$(baseline_print_summary)"
 details_output="$(baseline_print_details)"
-for group in "HTTPS/521" "DB" "DNS/IP" "ORIGIN/FW"; do
+for group in "HTTPS/521" "DB" "DNS/IP" "ORIGIN/FW" "Proxy/CDN"; do
   assert_contains "$summary_output" "$group"
 done
 assert_contains "$details_output" "Group: HTTPS/521"
@@ -90,6 +98,8 @@ assert_contains "$details_output" "Group: DNS/IP"
 assert_contains "$details_output" "DNS_A_RECORD"
 assert_contains "$details_output" "Group: ORIGIN/FW"
 assert_contains "$details_output" "SERVICE_OLS"
+assert_contains "$details_output" "Group: Proxy/CDN"
+assert_contains "$details_output" "HTTPS_STATUS"
 
 
 echo "[baseline-smoke] secrets leak guard"
