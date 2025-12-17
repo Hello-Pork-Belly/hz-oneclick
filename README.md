@@ -31,3 +31,11 @@ bash <(curl -fsSL https://sh.horizontech.page)
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/hz.sh)
+```
+
+## 贡献与提交流程
+
+- 每个步骤或独立功能对应一个 PR，保持范围小、便于 review 和回滚。
+- 推荐使用前缀命名 PR 标题（如 `feat/xxx`、`fix/xxx`、`chore/xxx`、`docs/xxx` 或 `refactor/xxx`）。
+- 合并前必须通过 CI 检查。
+- PR 描述需严格按照模板填写，并确保 Summary、Testing 等必填项完整。
