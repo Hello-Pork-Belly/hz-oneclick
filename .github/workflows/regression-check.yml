@@ -65,16 +65,36 @@ jobs:
       - name: Forbidden terms in user-facing output
         run: |
           set -euo pipefail
-          mapfile -t scripts < <(find . -type f -name '*.sh' -not -path './.git/*' -print)
+          shopt -s nullglob globstar
 
-          if [ "${#scripts[@]}" -eq 0 ]; then
-            echo "No shell scripts detected; skipping forbidden term check."
+          scripts=(
+            hz.sh
+            modules/**/*.sh
+            lib/**/*.sh
+          )
+
+          filtered_scripts=()
+          for script in "${scripts[@]}"; do
+            case "$script" in
+              ./tests/*|tests/*|./.github/*|.github/*|./docs/*|docs/*|./.git/*|.git/*)
+                continue
+                ;;
+            esac
+            filtered_scripts+=("$script")
+          done
+
+          if [ "${#filtered_scripts[@]}" -eq 0 ]; then
+            echo "No user-facing shell scripts detected; skipping forbidden term check."
             exit 0
           fi
 
-          if grep -nEi '(echo|printf).*?(cloud provider|vendor)' "${scripts[@]}"; then
-            echo "Vendor-specific wording found in user-facing strings."
-            exit 1
-          else
-            echo "No vendor-specific wording detected in user-facing strings."
+          forbidden_re='(echo|printf).*?(oracle|aws|amazon|aliyun|tencent|azure|gcp|google cloud)'
+          if matches=$(grep -nEi "$forbidden_re" "${filtered_scripts[@]}" || true); then
+            if [ -n "$matches" ]; then
+              echo "Forbidden cloud provider references found in user-facing scripts:"
+              echo "$matches"
+              exit 1
+            fi
           fi
+
+          echo "No forbidden cloud provider references detected in user-facing scripts."
