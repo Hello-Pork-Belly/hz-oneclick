@@ -715,7 +715,7 @@ cleanup_db_interactive() {
   # [ANCHOR:DB_CLEANUP_FLOW]
   if ! command -v mysql >/dev/null 2>&1; then
     log_error "未找到 mysql 命令，无法执行数据库清理。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -734,7 +734,7 @@ cleanup_db_interactive() {
   read -rp "要删除的 DB 名称（例如: ols_wp）: " DB_NAME
   if [ -z "$DB_NAME" ]; then
     log_warn "DB 名称不能为空。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -742,7 +742,7 @@ cleanup_db_interactive() {
   read -rp "要删除的 DB 用户名（例如: ols_user）: " DB_USER
   if [ -z "$DB_USER" ]; then
     log_warn "DB 用户名不能为空。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -754,7 +754,7 @@ cleanup_db_interactive() {
   echo
   if [ -z "$ADMIN_PASS" ]; then
     log_warn "管理账号密码不能为空。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -769,7 +769,7 @@ cleanup_db_interactive() {
   read -rp "为确认操作，请再次输入 DB 名称 ($DB_NAME): " tmp
   if [ "$tmp" != "$DB_NAME" ]; then
     log_warn "两次 DB 名称不一致，已取消。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -777,7 +777,7 @@ cleanup_db_interactive() {
   read -rp "如需继续，请输入大写 'YES': " tmp
   if [ "$tmp" != "YES" ]; then
     log_warn "未输入 YES，已取消数据库清理。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -788,7 +788,7 @@ cleanup_db_interactive() {
     -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; DROP USER IF EXISTS '$DB_USER'@'%'; FLUSH PRIVILEGES;"
 
   log_info "数据库 $DB_NAME 与用户 $DB_USER 已尝试删除（如存在）。"
-  read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+  read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
   cleanup_db_redis_menu
   return
 }
@@ -797,7 +797,7 @@ cleanup_redis_interactive() {
   # [ANCHOR:REDIS_CLEANUP_FLOW]
   if ! command -v redis-cli >/dev/null 2>&1; then
     log_error "未找到 redis-cli，无法执行 Redis 清理。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -816,7 +816,7 @@ cleanup_redis_interactive() {
   read -rp "Redis DB index（例如: 1）: " RD
   if [ -z "$RD" ]; then
     log_warn "Redis DB index 不能为空。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -824,7 +824,7 @@ cleanup_redis_interactive() {
   read -rp "请再次输入 Redis DB index 确认: " RD2
   if [ "$RD" != "$RD2" ]; then
     log_warn "两次 DB index 不一致，已取消。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -834,7 +834,7 @@ cleanup_redis_interactive() {
   read -rp "如需继续，请输入大写 'YES': " tmp
   if [ "$tmp" != "YES" ]; then
     log_warn "未输入 YES，已取消 Redis 清理。"
-    read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+    read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
     cleanup_db_redis_menu
     return
   fi
@@ -844,7 +844,7 @@ cleanup_redis_interactive() {
   redis-cli -h "$RH" -p "$RP" -n "$RD" FLUSHDB
 
   log_info "Redis DB ${RD} 已执行 FLUSHDB。"
-  read -rp "按回车返回“清理数据库 / Redis”菜单..." _
+  read -rp "按回车返回 '清理数据库 / Redis' 菜单..." _
   cleanup_db_redis_menu
   return
 }
@@ -867,7 +867,7 @@ prompt_site_info() {
   if [ -z "$SITE_SLUG" ]; then
     SITE_SLUG="${SITE_DOMAIN%%.*}"
     SITE_SLUG="${SITE_SLUG//[^a-zA-Z0-9]/}"
-    SITE_SLUG="$(echo "$SITE_SLUG" | tr 'A-Z' 'a-z')"
+    SITE_SLUG="$(echo "$SITE_SLUG" | tr '[:upper:]' '[:lower:]')"
     [ -z "$SITE_SLUG" ] && SITE_SLUG="wpsite"
   fi
 
@@ -1272,7 +1272,10 @@ EOF
         log_error "Let’s Encrypt 申请失败，跳过 SSL 配置。"; return; }
       cert_path="/etc/letsencrypt/live/${SITE_DOMAIN}/fullchain.pem"
       key_path="/etc/letsencrypt/live/${SITE_DOMAIN}/privkey.pem"
-      [ -f "$cert_path" ] && [ -f "$key_path" ] || { log_error "未找到 LE 证书文件，跳过 SSL 配置。"; return; }
+      if ! { [ -f "$cert_path" ] && [ -f "$key_path" ]; }; then
+        log_error "未找到 LE 证书文件，跳过 SSL 配置。"
+        return
+      fi
 
       if ! grep -q "^listener https" "$HTTPD_CONF"; then
         cat >>"$HTTPD_CONF" <<EOF

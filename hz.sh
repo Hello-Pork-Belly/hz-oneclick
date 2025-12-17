@@ -141,7 +141,7 @@ main_menu() {
       green "  2) rclone 基础安装（OneDrive 等）"
       cyan  "  3) Plex 媒体服务器"
       green "  4) Transmission BT 下载"
-      cyan  "  5) Tailscale “接入”"
+      cyan  "  5) Tailscale 接入"
       green "  6) Cloudflare Tunnel 穿透"
       cyan  "  7) 邮件报警（msmtp + Brevo）"
       green "  8) WordPress 备份（数据库 + 文件）"
