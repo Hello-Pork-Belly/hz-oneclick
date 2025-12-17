@@ -17,6 +17,7 @@ BASELINE_DB_LIB="${REPO_ROOT}/lib/baseline_db.sh"
 BASELINE_DNS_LIB="${REPO_ROOT}/lib/baseline_dns.sh"
 BASELINE_ORIGIN_LIB="${REPO_ROOT}/lib/baseline_origin.sh"
 BASELINE_PROXY_LIB="${REPO_ROOT}/lib/baseline_proxy.sh"
+BASELINE_WP_LIB="${REPO_ROOT}/lib/baseline_wp.sh"
 
 cd /
 
@@ -85,6 +86,11 @@ fi
 if [ -r "$BASELINE_PROXY_LIB" ]; then
   # shellcheck source=/dev/null
   . "$BASELINE_PROXY_LIB"
+fi
+
+if [ -r "$BASELINE_WP_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$BASELINE_WP_LIB"
 fi
 
 : "${TIER_LITE:=lite}"
@@ -307,8 +313,9 @@ run_lomp_baseline_diagnostics() {
       echo "  4) Origin/Firewall (ports/service/UFW)"
       echo "  5) Step20-7 Proxy/CDN (521/TLS)"
       echo "  6) Step20-8 TLS/CERT (SNI/SAN/chain/expiry)"
+      echo "  7) Step20-9 WP/App (runtime + HTTP)"
       echo "  0) Return to main menu"
-      read -rp "Choose [0-6]: " choice
+      read -rp "Choose [0-7]: " choice
     else
       echo "=== 基线诊断（Baseline） ==="
       echo "仅做连通性诊断，不会修改外部配置，也不会保存密码。"
@@ -319,8 +326,9 @@ run_lomp_baseline_diagnostics() {
       echo "  4) Origin/Firewall（端口/服务/UFW）"
       echo "  5) Step20-7 反代/CDN（521/TLS）"
       echo "  6) Step20-8 TLS/证书（SNI/SAN/链/到期）"
+      echo "  7) Step20-9 WP/App（运行态 + HTTP）"
       echo "  0) 返回主菜单"
-      read -rp "请输入选项 [0-6]: " choice
+      read -rp "请输入选项 [0-7]: " choice
     fi
     echo
 
@@ -591,15 +599,66 @@ run_lomp_baseline_diagnostics() {
           read -rp "按回车返回 Baseline 菜单..." _
         fi
         ;;
+      7)
+        baseline_init
+        domain="${SITE_DOMAIN:-}"
+        if [ -z "$domain" ]; then
+          if [ "$lang" = "en" ]; then
+            read -rp "Enter the domain to diagnose (e.g., abc.yourdomain.com): " domain
+          else
+            read -rp "请输入要诊断的域名（例如: abc.yourdomain.com）: " domain
+          fi
+          domain="${domain//[[:space:]]/}"
+        fi
+
+        if [ "$lang" = "en" ]; then
+          read -rp "WordPress path (optional, e.g., /var/www/html): " wp_path
+        else
+          read -rp "请输入 WordPress 路径（可留空，例如 /var/www/html）: " wp_path
+        fi
+        wp_path="${wp_path//[[:space:]]/}"
+
+        if [ -z "$domain" ]; then
+          if [ "$lang" = "en" ]; then
+            log_error "Domain is required to run baseline diagnostics."
+          else
+            log_error "未提供域名，无法执行诊断。"
+          fi
+          continue
+        fi
+
+        if [ "$lang" = "en" ]; then
+          echo "Target domain: ${domain}"
+        else
+          echo "诊断域名: ${domain}"
+        fi
+
+        if declare -F baseline_wp_run >/dev/null 2>&1; then
+          baseline_wp_run "$domain" "$wp_path" "$lang"
+        else
+          baseline_add_result "WP/APP" "WP_BASELINE" "WARN" "wp_module_missing" "module not loaded" ""
+        fi
+
+        baseline_print_summary
+        baseline_print_details
+        baseline_print_keywords
+
+        echo
+        if [ "$lang" = "en" ]; then
+          read -rp "Press Enter to return to Baseline menu..." _
+        else
+          read -rp "按回车返回 Baseline 菜单..." _
+        fi
+        ;;
       0)
         show_main_menu
         return
         ;;
       *)
         if [ "$lang" = "en" ]; then
-          log_warn "Invalid input, please choose 0-6."
+          log_warn "Invalid input, please choose 0-7."
         else
-          log_warn "无效输入，请选择 0-6。"
+          log_warn "无效输入，请选择 0-7。"
         fi
         ;;
     esac

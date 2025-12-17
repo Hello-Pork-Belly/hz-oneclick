@@ -86,6 +86,24 @@ else
   echo "[smoke] baseline_tls libraries not found; skipping baseline_tls smoke"
 fi
 
+echo "[smoke] baseline_wp diagnostics smoke"
+if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_wp.sh" ]; then
+  # shellcheck source=/dev/null
+  . ./lib/baseline.sh
+  # shellcheck source=/dev/null
+  . ./lib/baseline_wp.sh
+
+  baseline_init
+  BASELINE_WP_NO_PROMPT=1 baseline_wp_run "example.invalid" "" "en"
+  wp_summary="$(baseline_print_summary)"
+  wp_details="$(baseline_print_details)"
+  echo "$wp_summary" | grep -q "WP/APP"
+  echo "$wp_details" | grep -q "Group: WP/APP"
+  echo "$wp_details" | grep -q "HTTP_ROOT"
+else
+  echo "[smoke] baseline_wp libraries not found; skipping baseline_wp smoke"
+fi
+
 echo "[smoke] baseline regression suite"
 bash tests/baseline_smoke.sh
 
