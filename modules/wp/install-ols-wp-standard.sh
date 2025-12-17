@@ -30,6 +30,7 @@ BOLD="\033[1m"
 NC="\033[0m"
 
 SCRIPT_VERSION="0.9"
+POST_SUMMARY_SHOWN=0
 
 log_info()  {
   # [ANCHOR:LOG_INFO]
@@ -109,20 +110,56 @@ _detect_public_ip() {
 
 # [ANCHOR:POST_INSTALL_SUMMARY]
 get_public_ipv4() {
-  # 优先用外网探测；失败则输出空
-  curl -fsS4 --max-time 3 https://api.ipify.org 2>/dev/null || true
+  local urls=(
+    "https://api.ipify.org"
+    "https://ipv4.icanhazip.com"
+    "https://ifconfig.me/ip"
+  )
+  local ip
+
+  for url in "${urls[@]}"; do
+    ip="$(curl -fsS4 --max-time 3 "$url" 2>/dev/null || true)"
+    ip="$(echo "$ip" | tr -d ' \t\r\n')"
+    if [ -n "$ip" ]; then
+      echo "$ip"
+      return
+    fi
+  done
 }
 
 get_public_ipv6() {
-  curl -fsS6 --max-time 3 https://api64.ipify.org 2>/dev/null || true
+  local urls=(
+    "https://api64.ipify.org"
+    "https://ipv6.icanhazip.com"
+    "https://ifconfig.me/ip"
+  )
+  local ip
+
+  for url in "${urls[@]}"; do
+    ip="$(curl -fsS6 --max-time 3 "$url" 2>/dev/null || true)"
+    ip="$(echo "$ip" | tr -d ' \t\r\n')"
+    if [ "$url" = "https://ifconfig.me/ip" ] && [ -z "$ip" ]; then
+      continue
+    fi
+    if [ -n "$ip" ]; then
+      echo "$ip"
+      return
+    fi
+  done
 }
 
 show_post_install_summary() {
   local domain="$1"
 
+  if [ "${POST_SUMMARY_SHOWN:-0}" -eq 1 ]; then
+    return
+  fi
+
   local ipv4 ipv6
   ipv4="$(get_public_ipv4)"
   ipv6="$(get_public_ipv6)"
+
+  POST_SUMMARY_SHOWN=1
 
   echo
   echo -e "${CYAN}================ 部署信息（请务必保存） ================${NC}"
@@ -141,33 +178,22 @@ show_post_install_summary() {
   fi
 
   echo
-  echo -e "${CYAN}DNS 解析建议（示例）：${NC}"
-  if [[ -n "${ipv4}" ]]; then
-    echo -e "  A     ${domain}  ->  ${ipv4}"
-  else
-    echo -e "  A     ${domain}  ->  <你的服务器公网IPv4>"
-  fi
+  echo -e "${CYAN}DNS 解析指引：${NC}"
+  echo -e "  - A 记录：@ -> ${ipv4:-<填写服务器公网 IPv4>}"
   if [[ -n "${ipv6}" ]]; then
-    echo -e "  AAAA  ${domain}  ->  ${ipv6}"
-  else
-    echo -e "  AAAA  ${domain}  ->  <可选：你的服务器公网IPv6>"
+    echo -e "  - AAAA 记录：@ -> ${ipv6}"
   fi
+  echo -e "  - 如使用代理/CDN，请确认源站 IP 填写为实际服务器地址。"
 
   echo
-  echo -e "${CYAN}端口提醒：${NC}"
-  echo -e "  - 请确保云防火墙与 UFW 均放行：80 / 443 / 7080"
-  echo -e "  - 若 80/443 未放行，会导致申请/访问 HTTPS 失败或站点不可访问"
-
-  echo
-  echo -e "${CYAN}访问入口：${NC}"
-  echo -e "  - https://${domain}/"
-  echo -e "  - https://${domain}/wp-admin/"
-  echo -e "  - http://${domain}/  （用于排查 301/跳转/证书问题）"
+  echo -e "${CYAN}防火墙检查：${NC}"
+  echo -e "  - 确认系统防火墙已放行 80/443"
+  echo -e "  - 确认云防火墙/安全组已放行 80/443"
 
   echo
   echo -e "${CYAN}=========================================================${NC}"
   echo
-  read -rp "按回车返回菜单..." _
+  read -rp "按回车返回主菜单..." _
 }
 
 ########################
@@ -1088,6 +1114,10 @@ install_ols_wp_flow() {
   env_self_check
   configure_ssl
   print_summary
+
+  if [ "${POST_SUMMARY_SHOWN:-0}" -eq 0 ]; then
+    show_post_install_summary "${SITE_DOMAIN}"
+  fi
 
   echo "-------------------------------------"
   echo "  1) 返回主菜单"
