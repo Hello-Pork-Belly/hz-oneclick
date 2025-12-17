@@ -65,6 +65,10 @@ if [ -r "${REPO_ROOT}/lib/baseline_wp.sh" ]; then
   # shellcheck source=/dev/null
   . "${REPO_ROOT}/lib/baseline_wp.sh"
 fi
+if [ -r "${REPO_ROOT}/lib/baseline_lsws.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${REPO_ROOT}/lib/baseline_lsws.sh"
+fi
 
 echo "[baseline-smoke] framework API availability"
 baseline_init
@@ -100,10 +104,13 @@ fi
 if declare -F baseline_wp_run >/dev/null 2>&1; then
   BASELINE_WP_NO_PROMPT=1 baseline_wp_run "example.invalid" "" "en"
 fi
+if declare -F baseline_lsws_run >/dev/null 2>&1; then
+  baseline_lsws_run "" "en"
+fi
 
 summary_output="$(baseline_print_summary)"
 details_output="$(baseline_print_details)"
-for group in "HTTPS/521" "DB" "DNS/IP" "ORIGIN/FW" "Proxy/CDN" "TLS/CERT" "WP/APP"; do
+for group in "HTTPS/521" "DB" "DNS/IP" "ORIGIN/FW" "Proxy/CDN" "TLS/CERT" "WP/APP" "LSWS/OLS"; do
   assert_contains "$summary_output" "$group"
 done
 assert_contains "$details_output" "Group: HTTPS/521"
@@ -119,6 +126,9 @@ assert_contains "$details_output" "HTTPS_STATUS"
 assert_contains "$details_output" "Group: TLS/CERT"
 assert_contains "$details_output" "CERT_CHAIN"
 assert_contains "$details_output" "Group: WP/APP"
+assert_contains "$summary_output" "LSWS/OLS"
+assert_contains "$details_output" "Group: LSWS/OLS"
+assert_contains "$details_output" "lsws_active"
 
 
 echo "[baseline-smoke] secrets leak guard"

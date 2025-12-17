@@ -18,6 +18,7 @@ BASELINE_DNS_LIB="${REPO_ROOT}/lib/baseline_dns.sh"
 BASELINE_ORIGIN_LIB="${REPO_ROOT}/lib/baseline_origin.sh"
 BASELINE_PROXY_LIB="${REPO_ROOT}/lib/baseline_proxy.sh"
 BASELINE_WP_LIB="${REPO_ROOT}/lib/baseline_wp.sh"
+BASELINE_LSWS_LIB="${REPO_ROOT}/lib/baseline_lsws.sh"
 
 cd /
 
@@ -91,6 +92,11 @@ fi
 if [ -r "$BASELINE_WP_LIB" ]; then
   # shellcheck source=/dev/null
   . "$BASELINE_WP_LIB"
+fi
+
+if [ -r "$BASELINE_LSWS_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$BASELINE_LSWS_LIB"
 fi
 
 : "${TIER_LITE:=lite}"
@@ -314,8 +320,9 @@ run_lomp_baseline_diagnostics() {
       echo "  5) Step20-7 Proxy/CDN (521/TLS)"
       echo "  6) Step20-8 TLS/CERT (SNI/SAN/chain/expiry)"
       echo "  7) Step20-9 WP/App (runtime + HTTP)"
+      echo "  8) Step20-10 LSWS/OLS (service/port/config/logs)"
       echo "  0) Return to main menu"
-      read -rp "Choose [0-7]: " choice
+      read -rp "Choose [0-8]: " choice
     else
       echo "=== 基线诊断（Baseline） ==="
       echo "仅做连通性诊断，不会修改外部配置，也不会保存密码。"
@@ -327,8 +334,9 @@ run_lomp_baseline_diagnostics() {
       echo "  5) Step20-7 反代/CDN（521/TLS）"
       echo "  6) Step20-8 TLS/证书（SNI/SAN/链/到期）"
       echo "  7) Step20-9 WP/App（运行态 + HTTP）"
+      echo "  8) Step20-10 LSWS/OLS（服务/端口/配置/日志）"
       echo "  0) 返回主菜单"
-      read -rp "请输入选项 [0-7]: " choice
+      read -rp "请输入选项 [0-8]: " choice
     fi
     echo
 
@@ -367,7 +375,7 @@ run_lomp_baseline_diagnostics() {
       baseline_print_keywords
 
       echo
-        if [ "$lang" = "en" ]; then
+      if [ "$lang" = "en" ]; then
           read -rp "Press Enter to return to Baseline menu..." _
         else
           read -rp "按回车返回 Baseline 菜单..." _
@@ -647,6 +655,32 @@ run_lomp_baseline_diagnostics() {
         if [ "$lang" = "en" ]; then
           read -rp "Press Enter to return to Baseline menu..." _
         else
+        read -rp "按回车返回 Baseline 菜单..." _
+      fi
+        ;;
+      8)
+        baseline_init
+        if [ "$lang" = "en" ]; then
+          read -rp "Domain to probe (optional, leave blank to skip): " domain
+        else
+          read -rp "请输入要探测的域名（可留空）: " domain
+        fi
+        domain="${domain//[[:space:]]/}"
+
+        if declare -F baseline_lsws_run >/dev/null 2>&1; then
+          baseline_lsws_run "$domain" "$lang"
+        else
+          baseline_add_result "LSWS/OLS" "LSWS_BASELINE" "WARN" "module_missing" "baseline_lsws.sh not loaded" ""
+        fi
+
+        baseline_print_summary
+        baseline_print_details
+        baseline_print_keywords
+
+        echo
+        if [ "$lang" = "en" ]; then
+          read -rp "Press Enter to return to Baseline menu..." _
+        else
           read -rp "按回车返回 Baseline 菜单..." _
         fi
         ;;
@@ -656,9 +690,9 @@ run_lomp_baseline_diagnostics() {
         ;;
       *)
         if [ "$lang" = "en" ]; then
-          log_warn "Invalid input, please choose 0-7."
+          log_warn "Invalid input, please choose 0-8."
         else
-          log_warn "无效输入，请选择 0-7。"
+          log_warn "无效输入，请选择 0-8。"
         fi
         ;;
     esac

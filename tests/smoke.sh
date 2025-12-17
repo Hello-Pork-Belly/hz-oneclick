@@ -104,6 +104,22 @@ else
   echo "[smoke] baseline_wp libraries not found; skipping baseline_wp smoke"
 fi
 
+echo "[smoke] baseline_lsws diagnostics smoke"
+if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_lsws.sh" ]; then
+  # shellcheck source=/dev/null
+  . ./lib/baseline.sh
+  # shellcheck source=/dev/null
+  . ./lib/baseline_lsws.sh
+
+  baseline_init
+  baseline_lsws_run "" "en"
+  lsws_details="$(baseline_print_details)"
+  echo "$lsws_details" | grep -q "Group: LSWS/OLS"
+  echo "$lsws_details" | grep -Eq "\[(PASS|WARN|FAIL)\]"
+else
+  echo "[smoke] baseline_lsws libraries not found; skipping baseline_lsws smoke"
+fi
+
 echo "[smoke] baseline regression suite"
 bash tests/baseline_smoke.sh
 
