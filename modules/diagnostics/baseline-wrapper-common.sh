@@ -27,6 +27,8 @@ baseline_wrapper_parse_inputs() {
 
   local lang_set=0
 
+  BASELINE_REDACT="${BASELINE_REDACT:-${HZ_BASELINE_REDACT:-0}}"
+
   _bw_domain_ref="${_bw_domain_ref:-${HZ_BASELINE_DOMAIN:-}}"
   _bw_lang_ref="${_bw_lang_ref:-${HZ_BASELINE_LANG:-${HZ_LANG:-zh}}}"
   _bw_format_ref="${_bw_format_ref:-${HZ_BASELINE_FORMAT:-text}}"
@@ -41,12 +43,16 @@ baseline_wrapper_parse_inputs() {
         _bw_format_ref="${1#--format=}"
         shift
         ;;
+      --redact)
+        BASELINE_REDACT=1
+        shift
+        ;;
       --)
         shift
         continue
         ;;
       --help)
-        echo "Usage: $0 [domain] [lang] [--format text|json]" >&2
+        echo "Usage: $0 [domain] [lang] [--format text|json] [--redact]" >&2
         exit 0
         ;;
       *)
@@ -63,6 +69,7 @@ baseline_wrapper_parse_inputs() {
 
   _bw_lang_ref="$(baseline_wrapper_normalize_lang "$_bw_lang_ref")"
   _bw_format_ref="$(baseline_wrapper_normalize_format "$_bw_format_ref")"
+  export BASELINE_REDACT
 }
 
 baseline_wrapper_normalize_format() {
@@ -431,6 +438,23 @@ baseline_wrapper_finalize() {
 
   report_path="$(baseline_wrapper_write_report "$group" "$domain" "$lang" "$summary_output" "$details_output" "$key_line")"
 
+  if baseline_redact_enabled; then
+    summary_output="$(printf "%s" "$summary_output" | baseline_sanitize_text)"
+    details_output="$(printf "%s" "$details_output" | baseline_sanitize_text)"
+    key_line="$(printf "%s" "$key_line" | baseline_sanitize_text)"
+  fi
+
+  local display_report_path display_reason display_key_line
+  display_report_path="$report_path"
+  display_reason="$reason"
+  display_key_line="$key_line"
+
+  if baseline_redact_enabled; then
+    display_report_path="$(printf "%s" "$display_report_path" | baseline_sanitize_text)"
+    display_reason="$(printf "%s" "$display_reason" | baseline_sanitize_text)"
+    display_key_line="$(printf "%s" "$display_key_line" | baseline_sanitize_text)"
+  fi
+
   if [ "$format" = "json" ]; then
     local json_payload report_json_path
     report_json_path="${report_path%.txt}.json"
@@ -440,16 +464,31 @@ baseline_wrapper_finalize() {
     return
   fi
 
-  printf "%s\n\n%s\n%s\n" "$summary_output" "$details_output" "$key_line"
-  baseline_wrapper_print_verdict "$overall" "$reason" "$key_line" "$report_path"
+  printf "%s\n\n%s\n%s\n" "$summary_output" "$details_output" "$display_key_line"
+  baseline_wrapper_print_verdict "$overall" "$display_reason" "$display_key_line" "$display_report_path"
 }
 
 # Fallback sanitizer when baseline_common is unavailable
 if ! declare -f baseline_sanitize_text >/dev/null 2>&1; then
+  baseline_redact_enabled() { [ "${BASELINE_REDACT:-0}" = "1" ]; }
+  baseline_redact_text() {
+    if ! baseline_redact_enabled; then
+      cat
+      return
+    fi
+    sed -E \
+      -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/<redacted-email>/g' \
+      -e 's#([0-9]{1,3}\.){3}[0-9]{1,3}#<redacted-ip>#g' \
+      -e 's#([0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f]{0,4}#<redacted-ip>#g' \
+      -e 's#([A-Za-z0-9-]+\.)+[A-Za-z]{2,}#<redacted-domain>#g' \
+      -e 's#(/[^[:space:]]+)#<redacted-path>#g' \
+      -e 's#([A-Za-z]:\\\\[^[:space:]]+)#<redacted-path>#g'
+  }
   baseline_sanitize_text() {
     sed -E \
       -e 's/((authorization|token|password|secret|apikey|api_key)[[:space:]]*[:=][[:space:]]*).*/\1[REDACTED]/Ig' \
       -e 's/((^|[[:space:]])key=)[^[:space:]]+/\1[REDACTED]/Ig' \
-      -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig'
+      -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' | \
+      baseline_redact_text
   }
 fi

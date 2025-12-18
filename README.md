@@ -64,6 +64,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 - JSON 与文本报告同样经过脱敏处理，措辞保持供应商中立（以 `abc.yourdomain.com` 等占位符为例）。
 - JSON 输出包含 `schema_version`、`generated_at` 等标准字段，方便脚本或 CI 校验结构。
 - Baseline Diagnostics JSON Schema 存放在 `docs/schema/baseline_diagnostics.schema.json`，CI 也会用它做回归校验（示例命令的域名请继续使用 `example.com`、`abc.yourdomain.com` 等占位符）。
+- 需要进一步收敛敏感信息时，可追加 `--redact` 触发可选脱敏模式（域名、IP、邮箱、绝对路径会替换为 `<redacted-domain>`、`<redacted-ip>`、`<redacted-email>`、`<redacted-path>` 等占位符）。
+  - 仅用 JSON 输出：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh) --format json`
+  - 仅用脱敏输出：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh) --redact`
+  - 同时开启：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh) --format json --redact`
 
 ## Baseline Diagnostics 菜单入口
 

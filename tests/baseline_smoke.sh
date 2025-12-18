@@ -223,10 +223,11 @@ fi
 
 echo "[baseline-smoke] wrapper json output"
 validate_wrapper_json() {
-  local json_output expected_group regex_pattern pretty
+  local json_output expected_group regex_pattern allow_redacted pretty
   json_output="$1"
   expected_group="$2"
   regex_pattern="$3"
+  allow_redacted="${4:-0}"
 
   pretty="$(echo "$json_output" | python3 -m json.tool)"
 
@@ -235,7 +236,7 @@ validate_wrapper_json() {
     exit 1
   fi
 
-  JSON_DATA="$json_output" SCHEMA_PATH="$SCHEMA_PATH" python3 - "$expected_group" "$regex_pattern" <<'PY'
+  JSON_DATA="$json_output" SCHEMA_PATH="$SCHEMA_PATH" ALLOW_REDACTED_PATHS="$allow_redacted" python3 - "$expected_group" "$regex_pattern" <<'PY'
 import json
 import os
 import re
@@ -246,6 +247,7 @@ data = json.loads(os.environ.get("JSON_DATA", "{}"))
 expected = sys.argv[1]
 regex = sys.argv[2]
 schema_path = Path(os.environ.get("SCHEMA_PATH", ""))
+allow_redacted_paths = os.environ.get("ALLOW_REDACTED_PATHS") == "1"
 if not schema_path.is_file():
     print(f"schema missing at {schema_path}", file=sys.stderr)
     sys.exit(1)
@@ -298,6 +300,8 @@ for idx, item in enumerate(data["results"]):
 
     for path_field in ("report", "report_json"):
         path_val = item.get(path_field)
+        if allow_redacted_paths and isinstance(path_val, str) and "redacted" in path_val.lower():
+            continue
         if path_val and not os.path.isfile(path_val):
             fail(f"missing report file: {path_val}")
 
@@ -328,6 +332,25 @@ fi
 if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" ]; then
   cache_json_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" --format json)"
   validate_wrapper_json "$cache_json_output" "cache-redis" "$vendor_regex"
+fi
+
+echo "[baseline-smoke] wrapper json output (redact mode)"
+if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
+  dns_json_redacted_output="$(BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en" --format json --redact)"
+  validate_wrapper_json "$dns_json_redacted_output" "dns-ip" "$vendor_regex" 1
+  assert_contains "$dns_json_redacted_output" "<redacted"
+fi
+
+if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" ]; then
+  tls_json_redacted_output="$(BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" "example.com" "en" --format json --redact)"
+  validate_wrapper_json "$tls_json_redacted_output" "tls-https" "$vendor_regex" 1
+  assert_contains "$tls_json_redacted_output" "<redacted"
+fi
+
+if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" ]; then
+  cache_json_redacted_output="$(BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" --format json --redact)"
+  validate_wrapper_json "$cache_json_redacted_output" "cache-redis" "$vendor_regex" 1
+  assert_contains "$cache_json_redacted_output" "<redacted"
 fi
 
 

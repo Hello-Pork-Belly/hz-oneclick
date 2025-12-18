@@ -316,6 +316,18 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
       exit 1
     fi
   fi
+
+  echo "[smoke] baseline_triage redacted json run"
+  redacted_output_file="$(mktemp)"
+  BASELINE_TEST_MODE=1 BASELINE_REDACT=1 baseline_triage_run "triage.example.com" "en" "json" > "$redacted_output_file"
+  redacted_json_path="${BASELINE_LAST_REPORT_JSON_PATH:-}"
+  if [ -z "$redacted_json_path" ] || [ ! -f "$redacted_json_path" ]; then
+    echo "[smoke] redacted triage JSON report missing" >&2
+    exit 1
+  fi
+  validate_json_file "$redacted_json_path"
+  grep -qi "<redacted" "$redacted_json_path"
+  rm -f "$redacted_output_file"
 else
   echo "[smoke] baseline_triage libraries not found; skipping triage smoke"
 fi
@@ -351,6 +363,18 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
       exit 1
     fi
   fi
+
+  echo "[smoke] quick triage standalone runner (redact mode)"
+  before_latest_json="$(ls -1t /tmp/hz-baseline-triage-*.json 2>/dev/null | head -n1)"
+  triage_output_json_redacted="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 bash ./modules/diagnostics/quick-triage.sh --format json --redact)"
+  echo "$triage_output_json_redacted" | grep -qi "<redacted"
+  latest_json="$(ls -1t /tmp/hz-baseline-triage-*.json 2>/dev/null | head -n1)"
+  if [ -z "$latest_json" ] || { [ -n "$before_latest_json" ] && [ "$latest_json" = "$before_latest_json" ]; }; then
+    echo "[smoke] no new redacted triage JSON report found" >&2
+    exit 1
+  fi
+  validate_json_file "$latest_json"
+  grep -qi "<redacted" "$latest_json"
 else
   echo "[smoke] quick triage runner not found; skipping"
 fi

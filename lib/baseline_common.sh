@@ -2,13 +2,34 @@
 
 # Common helpers for baseline diagnostics.
 
+baseline_redact_enabled() {
+  [ "${BASELINE_REDACT:-0}" = "1" ]
+}
+
+baseline_redact_text() {
+  # Optional redaction pass for domains, IPs, emails, absolute paths.
+  if ! baseline_redact_enabled; then
+    cat
+    return
+  fi
+
+  sed -E \
+    -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/<redacted-email>/g' \
+    -e 's#([0-9]{1,3}\.){3}[0-9]{1,3}#<redacted-ip>#g' \
+    -e 's#([0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f]{0,4}#<redacted-ip>#g' \
+    -e 's#([A-Za-z0-9-]+\.)+[A-Za-z]{2,}#<redacted-domain>#g' \
+    -e 's#(/[^[:space:]]+)#<redacted-path>#g' \
+    -e 's#([A-Za-z]:\\\\[^[:space:]]+)#<redacted-path>#g'
+}
+
 baseline_sanitize_text() {
   # Redact common sensitive keys before writing to report/output.
   # Preserves line structure while masking values.
   sed -E \
     -e 's/((authorization|token|password|secret|apikey|api_key)[[:space:]]*[:=][[:space:]]*).*/\1[REDACTED]/Ig' \
     -e 's/((^|[[:space:]])key=)[^[:space:]]+/\1[REDACTED]/Ig' \
-    -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig'
+    -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' | \
+    baseline_redact_text
 }
 
 baseline_vendor_scrub_text() {

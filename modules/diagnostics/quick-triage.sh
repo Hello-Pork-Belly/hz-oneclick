@@ -7,6 +7,7 @@ HZ_TRIAGE_KEEP_TMP="${HZ_TRIAGE_KEEP_TMP:-0}"
 HZ_TRIAGE_USE_LOCAL="${HZ_TRIAGE_USE_LOCAL:-0}"
 HZ_TRIAGE_LOCAL_ROOT="${HZ_TRIAGE_LOCAL_ROOT:-$(pwd)}"
 HZ_TRIAGE_FORMAT="${HZ_TRIAGE_FORMAT:-text}"
+HZ_TRIAGE_REDACT="${HZ_TRIAGE_REDACT:-0}"
 
 if [ "${HZ_TRIAGE_TEST_MODE:-0}" = "1" ] && [ "${BASELINE_TEST_MODE:-0}" != "1" ]; then
   BASELINE_TEST_MODE=1
@@ -119,8 +120,12 @@ parse_args() {
         HZ_TRIAGE_FORMAT="${1#--format=}"
         shift
         ;;
+      --redact)
+        HZ_TRIAGE_REDACT=1
+        shift
+        ;;
       --help)
-        echo "Usage: $0 [--format text|json]"
+        echo "Usage: $0 [--format text|json] [--redact]"
         exit 0
         ;;
       *)
@@ -137,13 +142,16 @@ run_triage() {
   domain="$2"
   format="$3"
 
+  BASELINE_REDACT="$HZ_TRIAGE_REDACT"
+  export BASELINE_REDACT
+
   BASELINE_WP_NO_PROMPT=1 export BASELINE_WP_NO_PROMPT
 
   output="$(baseline_triage_run "$domain" "$lang" "$format")"
   sanitized_output="$(printf "%s" "$output" | sanitize_output)"
   echo "$sanitized_output"
 
-  report_path="$(printf "%s" "$output" | awk '/^REPORT:/ {print $2}' | head -n1)"
+  report_path="${BASELINE_LAST_REPORT_PATH:-$(printf "%s" "$output" | awk '/^REPORT:/ {print $2}' | head -n1)}"
   if [ -n "$report_path" ] && [ -f "$report_path" ]; then
     chmod 600 "$report_path" 2>/dev/null || true
     tmp_sanitized="${report_path}.sanitized"

@@ -8,11 +8,26 @@ if ! declare -f baseline_sanitize_text >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     . "$(dirname "${BASH_SOURCE[0]}")/baseline_common.sh"
   else
+    baseline_redact_enabled() { [ "${BASELINE_REDACT:-0}" = "1" ]; }
+    baseline_redact_text() {
+      if ! baseline_redact_enabled; then
+        cat
+        return
+      fi
+      sed -E \
+        -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/<redacted-email>/g' \
+        -e 's#([0-9]{1,3}\.){3}[0-9]{1,3}#<redacted-ip>#g' \
+        -e 's#([0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f]{0,4}#<redacted-ip>#g' \
+        -e 's#([A-Za-z0-9-]+\.)+[A-Za-z]{2,}#<redacted-domain>#g' \
+        -e 's#(/[^[:space:]]+)#<redacted-path>#g' \
+        -e 's#([A-Za-z]:\\\\[^[:space:]]+)#<redacted-path>#g'
+    }
     baseline_sanitize_text() {
       sed -E \
         -e 's/((authorization|token|password|secret|apikey|api_key)[[:space:]]*[:=][[:space:]]*).*/\1[REDACTED]/Ig' \
         -e 's/((^|[[:space:]])key=)[^[:space:]]+/\1[REDACTED]/Ig' \
-        -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig'
+        -e 's/((bearer)[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' | \
+        baseline_redact_text
     }
   fi
 fi
@@ -518,6 +533,10 @@ baseline_triage__write_json_report() {
   json_path="$5"
   report_path="$6"
 
+  local json_path_raw report_path_raw
+  json_path_raw="$json_path"
+  report_path_raw="$report_path"
+
   local generated_at
   generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
@@ -636,8 +655,8 @@ baseline_triage__write_json_report() {
 
     printf '\n  ]\n'
     printf '}\n'
-  } > "$json_path"
-  chmod 600 "$json_path" 2>/dev/null || true
+  } > "$json_path_raw"
+  chmod 600 "$json_path_raw" 2>/dev/null || true
 }
 
 baseline_triage_run() {
@@ -646,6 +665,10 @@ baseline_triage_run() {
   domain="$1"
   lang="$(baseline_triage__normalize_lang "$2")"
   format="$(baseline_triage__normalize_format "${3:-text}")"
+  report_json_path=""
+
+  BASELINE_LAST_REPORT_PATH=""
+  BASELINE_LAST_REPORT_JSON_PATH=""
 
   if [ -z "$domain" ]; then
     if [ "$lang" = "en" ]; then
@@ -702,15 +725,34 @@ baseline_triage_run() {
     baseline_triage__write_json_report "$domain" "$lang" "$ts" "$overall" "$report_json_path" "$report_path"
   fi
 
-  if [ "$overall" = "PASS" ]; then
-    echo "VERDICT: PASS (${verdict_reason})"
-  else
-    echo "VERDICT: ${overall} (${verdict_reason})"
+  BASELINE_LAST_REPORT_PATH="$report_path"
+  BASELINE_LAST_REPORT_JSON_PATH="${report_json_path:-}"
+  export BASELINE_LAST_REPORT_PATH BASELINE_LAST_REPORT_JSON_PATH
+
+  local display_report_path display_report_json_path display_key_line display_reason
+  display_report_path="$report_path"
+  display_report_json_path="$report_json_path"
+  display_key_line="$key_line"
+  display_reason="$verdict_reason"
+
+  if baseline_redact_enabled; then
+    display_report_path="$(printf "%s" "$display_report_path" | baseline_triage__sanitize_text)"
+    if [ -n "$display_report_json_path" ]; then
+      display_report_json_path="$(printf "%s" "$display_report_json_path" | baseline_triage__sanitize_text)"
+    fi
+    display_key_line="$(printf "%s" "$display_key_line" | baseline_triage__sanitize_text)"
+    display_reason="$(printf "%s" "$display_reason" | baseline_triage__sanitize_text)"
   fi
-  echo "$key_line"
-  echo "REPORT: ${report_path}"
+
+  if [ "$overall" = "PASS" ]; then
+    echo "VERDICT: PASS (${display_reason})"
+  else
+    echo "VERDICT: ${overall} (${display_reason})"
+  fi
+  echo "$display_key_line"
+  echo "REPORT: ${display_report_path}"
   if [ "$format" = "json" ]; then
-    echo "REPORT_JSON: ${report_json_path}"
+    echo "REPORT_JSON: ${display_report_json_path}"
   fi
 
   baseline_triage__teardown_test_mode
