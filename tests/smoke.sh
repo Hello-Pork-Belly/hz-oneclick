@@ -228,10 +228,16 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
   grep -q '"summary"' "$json_report_path"
   grep -q '"groups"' "$json_report_path"
 
+  if ! python3 -m json.tool "$json_report_path" >/dev/null; then
+    echo "[smoke] triage JSON report is not valid JSON" >&2
+    exit 1
+  fi
+
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
     regex=$(IFS='|'; echo "${forbidden_terms[*]}")
-    if grep -Eiq "$regex" "$json_report_path"; then
+    if matches=$(grep -Eina "$regex" "$json_report_path" || true) && [ -n "$matches" ]; then
       echo "[smoke] forbidden vendor terms found in triage JSON" >&2
+      printf "%s\n" "$matches" >&2
       exit 1
     fi
   fi
@@ -262,10 +268,15 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
   fi
   head -n1 "$standalone_json_report" | grep -q "^{"
   grep -q '"summary"' "$standalone_json_report"
+  if ! python3 -m json.tool "$standalone_json_report" >/dev/null; then
+    echo "[smoke] quick-triage JSON report is not valid JSON" >&2
+    exit 1
+  fi
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
     regex=$(IFS='|'; echo "${forbidden_terms[*]}")
-    if grep -Eiq "$regex" "$standalone_json_report"; then
+    if matches=$(grep -Eina "$regex" "$standalone_json_report" || true) && [ -n "$matches" ]; then
       echo "[smoke] forbidden vendor terms found in quick-triage JSON" >&2
+      printf "%s\n" "$matches" >&2
       exit 1
     fi
   fi

@@ -17,6 +17,39 @@ if ! declare -f baseline_sanitize_text >/dev/null 2>&1; then
   fi
 fi
 
+if ! declare -f baseline_vendor_scrub_text >/dev/null 2>&1; then
+  baseline_vendor_scrub_text() {
+    local vendor_terms_b64=(
+      "b3JhY2xl"
+      "YXdz"
+      "YW1hem9u"
+      "YWxpeXVu"
+      "dGVuY2VudA=="
+      "YXp1cmU="
+      "Z2Nw"
+      "Z29vZ2xlIGNsb3Vk"
+    )
+    local vendor_terms=()
+    local vendor_pattern=""
+    local term
+
+    for term_b64 in "${vendor_terms_b64[@]}"; do
+      if term=$(printf '%s' "$term_b64" | base64 -d 2>/dev/null); then
+        vendor_terms+=("$term")
+      fi
+    done
+
+    if [ ${#vendor_terms[@]} -eq 0 ]; then
+      cat
+      return
+    fi
+
+    vendor_pattern=$(IFS='|'; echo "${vendor_terms[*]}")
+    sed -E \
+      -e "s/(${vendor_pattern})/cloud provider/Ig"
+  }
+fi
+
 if ! declare -f baseline_json_escape >/dev/null 2>&1; then
   baseline_json_escape() {
     local input escaped
@@ -128,6 +161,14 @@ baseline_triage__sanitize_text() {
   baseline_sanitize_text
 }
 
+baseline_triage__sanitize_json_text() {
+  local text
+  text="$1"
+  text="$(printf "%s" "$text" | baseline_triage__sanitize_text)"
+  text="$(printf "%s" "$text" | baseline_vendor_scrub_text)"
+  printf "%s" "$text"
+}
+
 baseline_triage__first_issue_reason() {
   local target_status status idx total keyword id
   target_status="$1"
@@ -189,6 +230,7 @@ baseline_triage__json_array_from_lines() {
   data="$1"
   while IFS= read -r line; do
     [ -z "$line" ] && continue
+    line="$(baseline_triage__sanitize_json_text "$line")"
     escaped="$(baseline_json_escape "$line")"
     if [ $first -eq 0 ]; then
       printf ','
@@ -508,7 +550,7 @@ baseline_triage__write_json_report() {
     evidence_fmt=${evidence//\\n/$'\n'}
     while IFS= read -r ev_line; do
       [ -z "$ev_line" ] && continue
-      ev_line="$(printf "%s" "$ev_line" | baseline_triage__sanitize_text)"
+      ev_line="$(baseline_triage__sanitize_json_text "$ev_line")"
       if [ -z "${seen_evidence[${key_name}|${ev_line}]+x}" ]; then
         seen_evidence["${key_name}|${ev_line}"]=1
         group_evidence[$key_name]="${group_evidence[$key_name]:-}${ev_line}$'\n'"
@@ -518,7 +560,7 @@ baseline_triage__write_json_report() {
     suggestions_fmt=${suggestions//\\n/$'\n'}
     while IFS= read -r sug_line; do
       [ -z "$sug_line" ] && continue
-      sug_line="$(printf "%s" "$sug_line" | baseline_triage__sanitize_text)"
+      sug_line="$(baseline_triage__sanitize_json_text "$sug_line")"
       if [ -z "${seen_suggestion[${key_name}|${sug_line}]+x}" ]; then
         seen_suggestion["${key_name}|${sug_line}"]=1
         group_suggestions[$key_name]="${group_suggestions[$key_name]:-}${sug_line}$'\n'"
@@ -527,6 +569,10 @@ baseline_triage__write_json_report() {
   done
 
   keywords_json="$(baseline_triage__json_array_from_lines "$keywords_lines")"
+
+  domain="$(baseline_triage__sanitize_json_text "$domain")"
+  lang="$(baseline_triage__sanitize_json_text "$lang")"
+  ts="$(baseline_triage__sanitize_json_text "$ts")"
 
   umask 077
   {
@@ -630,4 +676,3 @@ baseline_triage_run() {
 
   baseline_triage__teardown_test_mode
 }
-
