@@ -40,6 +40,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 - 合并前必须通过 CI 检查。
 - PR 描述需严格按照模板填写，并确保 Summary、Testing 等必填项完整。
 
+## Sensitive docs policy
+
+- 规划文档、架构图、环境与基础设施细节必须保存在私有位置，不得提交到公共仓库。
+- 如需参考结构，可使用 `docs/templates/wp-architecture-plan.template.md` 中的公共占位模板，在本地复制后填充实际信息。
+
 ## Baseline Quick Triage
 
 - 直接运行：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh)`（可选语言 en/zh），按提示输入要诊断的域名（示例：`abc.yourdomain.com`）。

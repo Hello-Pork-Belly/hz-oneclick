@@ -1,0 +1,5 @@
+# Private planning docs should remain local only
+wp-architecture-plan.txt
+*private*
+*_private.*
+docs/private/
