@@ -58,6 +58,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
   - `REPORT_JSON: <JSON 报告路径>`
 - JSON 与文本报告同样经过脱敏处理，措辞保持供应商中立（以 `abc.yourdomain.com` 等占位符为例）。
 - JSON 输出包含 `schema_version`、`generated_at` 等标准字段，方便脚本或 CI 校验结构。
+- Baseline Diagnostics JSON Schema 存放在 `docs/schema/baseline_diagnostics.schema.json`，CI 也会用它做回归校验（示例命令的域名请继续使用 `example.com`、`abc.yourdomain.com` 等占位符）。
 
 ## Baseline Diagnostics 菜单入口
 

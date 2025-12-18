@@ -510,12 +510,13 @@ baseline_triage__run_groups() {
 }
 
 baseline_triage__write_json_report() {
-  local domain lang ts overall report_path
+  local domain lang ts overall json_path report_path
   domain="$1"
   lang="$2"
   ts="$3"
   overall="$4"
-  report_path="$5"
+  json_path="$5"
+  report_path="$6"
 
   local generated_at
   generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -580,14 +581,19 @@ baseline_triage__write_json_report() {
   ts="$(baseline_triage__sanitize_json_text "$ts")"
   generated_at="$(baseline_triage__sanitize_json_text "$generated_at")"
   overall="$(baseline_triage__sanitize_json_text "$overall")"
+  json_path="$(baseline_triage__sanitize_json_text "$json_path")"
+  report_path="$(baseline_triage__sanitize_json_text "$report_path")"
 
   umask 077
   {
     printf '{\n'
     printf '  "schema_version": "1.0",\n'
+    printf '  "format": "json",\n'
     printf '  "generated_at": "%s",\n' "$(baseline_json_escape "$generated_at")"
     printf '  "lang": "%s",\n' "$(baseline_json_escape "$lang")"
     printf '  "domain": "%s",\n' "$(baseline_json_escape "$domain")"
+    printf '  "report": "%s",\n' "$(baseline_json_escape "$report_path")"
+    printf '  "report_json": "%s",\n' "$(baseline_json_escape "$json_path")"
     printf '  "verdict": "%s",\n' "$(baseline_json_escape "$overall")"
     printf '  "results": [\n'
 
@@ -616,9 +622,11 @@ baseline_triage__write_json_report() {
       if [ $result_index -gt 0 ]; then
         printf ',\n'
       fi
-      printf '    {"group": "%s", "key": "%s", "verdict": "%s", "hint": "%s", "evidence": [%s], "suggestions": [%s]}' \
+      printf '    {"group": "%s", "key": "%s", "keyword": "%s", "state": "%s", "verdict": "%s", "hint": "%s", "evidence": [%s], "suggestions": [%s]}' \
         "$(baseline_json_escape "$key_name")" \
         "$(baseline_json_escape "$key_line")" \
+        "$(baseline_json_escape "$key_line")" \
+        "$(baseline_json_escape "$status")" \
         "$(baseline_json_escape "$status")" \
         "$(baseline_json_escape "$hint_line")" \
         "$evidence_json" \
@@ -628,8 +636,8 @@ baseline_triage__write_json_report() {
 
     printf '\n  ]\n'
     printf '}\n'
-  } > "$report_path"
-  chmod 600 "$report_path" 2>/dev/null || true
+  } > "$json_path"
+  chmod 600 "$json_path" 2>/dev/null || true
 }
 
 baseline_triage_run() {
@@ -691,7 +699,7 @@ baseline_triage_run() {
 
   if [ "$format" = "json" ]; then
     report_json_path="/tmp/hz-baseline-triage-${safe_domain}-${ts}.json"
-    baseline_triage__write_json_report "$domain" "$lang" "$ts" "$overall" "$report_json_path"
+    baseline_triage__write_json_report "$domain" "$lang" "$ts" "$overall" "$report_json_path" "$report_path"
   fi
 
   if [ "$overall" = "PASS" ]; then

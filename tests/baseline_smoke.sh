@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCHEMA_PATH="${REPO_ROOT}/docs/schema/baseline_diagnostics.schema.json"
 
 assert_contains() {
   local haystack needle
@@ -229,56 +230,81 @@ validate_wrapper_json() {
 
   pretty="$(echo "$json_output" | python3 -m json.tool)"
 
-  printf "%s" "$pretty" | grep -Eq '"schema_version"' || { echo "[baseline-smoke] schema_version missing" >&2; exit 1; }
-  printf "%s" "$pretty" | grep -Eq '"generated_at"' || { echo "[baseline-smoke] generated_at missing" >&2; exit 1; }
-  printf "%s" "$pretty" | grep -Eq '"results"' || { echo "[baseline-smoke] results array missing" >&2; exit 1; }
-  printf "%s" "$pretty" | grep -Eq '"hint"' || { echo "[baseline-smoke] hint field missing" >&2; exit 1; }
+  if [ ! -f "$SCHEMA_PATH" ]; then
+    echo "[baseline-smoke] schema file not found: ${SCHEMA_PATH}" >&2
+    exit 1
+  fi
 
-  JSON_DATA="$json_output" python3 - "$expected_group" "$regex_pattern" <<'PY'
+  JSON_DATA="$json_output" SCHEMA_PATH="$SCHEMA_PATH" python3 - "$expected_group" "$regex_pattern" <<'PY'
 import json
 import os
 import re
 import sys
+from pathlib import Path
 
 data = json.loads(os.environ.get("JSON_DATA", "{}"))
 expected = sys.argv[1]
 regex = sys.argv[2]
+schema_path = Path(os.environ.get("SCHEMA_PATH", ""))
+if not schema_path.is_file():
+    print(f"schema missing at {schema_path}", file=sys.stderr)
+    sys.exit(1)
+
+schema = json.loads(schema_path.read_text())
+
+def fail(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+def ensure_required(obj: dict, required, ctx: str) -> None:
+    for key in required:
+        if key not in obj:
+            fail(f"{ctx} missing field: {key}")
+
+def ensure_string(obj: dict, key: str, ctx: str) -> None:
+    if key in obj and not isinstance(obj[key], str):
+        fail(f"{ctx} field {key} is not a string")
+
+ensure_required(data, schema.get("required", []), "top-level")
+for string_field in ("schema_version", "generated_at", "format", "lang", "domain"):
+    ensure_string(data, string_field, "top-level")
 
 for required in ("schema_version", "generated_at", "lang", "domain", "results"):
     if required not in data:
-        print(f"missing field: {required}", file=sys.stderr)
-        sys.exit(1)
+        fail(f"missing field: {required}")
 
 if not isinstance(data.get("results"), list) or not data["results"]:
-    print("results array empty or invalid", file=sys.stderr)
-    sys.exit(1)
+    fail("results array empty or invalid")
 
-item = data["results"][0]
-for field in ("group", "key", "verdict", "hint", "evidence", "suggestions"):
-    if field not in item:
-        print(f"missing result field: {field}", file=sys.stderr)
-        sys.exit(1)
+result_schema = schema.get("definitions", {}).get("result", {})
+for idx, item in enumerate(data["results"]):
+    if not isinstance(item, dict):
+        fail(f"results[{idx}] is not an object")
+    ensure_required(item, result_schema.get("required", []), f"results[{idx}]")
+    for field in ("group", "key", "verdict", "hint", "keyword", "state"):
+        ensure_string(item, field, f"results[{idx}]")
+    if item.get("state") not in (None, "PASS", "WARN", "FAIL"):
+        fail(f"invalid state in results[{idx}]: {item.get('state')}")
 
-if expected and item.get("group") != expected:
-    print(f"group mismatch: {item.get('group')} != {expected}", file=sys.stderr)
-    sys.exit(1)
+    if idx == 0 and expected and item.get("group") != expected:
+        fail(f"group mismatch: {item.get('group')} != {expected}")
 
-for arr_field in ("evidence", "suggestions"):
-    if not isinstance(item.get(arr_field), list):
-        print(f"{arr_field} is not a list", file=sys.stderr)
-        sys.exit(1)
+    for arr_field in ("evidence", "suggestions"):
+        if not isinstance(item.get(arr_field), list):
+            fail(f"{arr_field} is not a list in results[{idx}]")
+        for arr_idx, entry in enumerate(item.get(arr_field)):
+            if not isinstance(entry, str):
+                fail(f"{arr_field}[{arr_idx}] is not a string in results[{idx}]")
 
-for path_field in ("report", "report_json"):
-    path_val = item.get(path_field)
-    if path_val and not os.path.isfile(path_val):
-        print(f"missing report file: {path_val}", file=sys.stderr)
-        sys.exit(1)
+    for path_field in ("report", "report_json"):
+        path_val = item.get(path_field)
+        if path_val and not os.path.isfile(path_val):
+            fail(f"missing report file: {path_val}")
 
 if regex:
     blob = json.dumps(data)
     if re.search(regex, blob, flags=re.IGNORECASE):
-        print("forbidden vendor wording found in JSON", file=sys.stderr)
-        sys.exit(1)
+        fail("forbidden vendor wording found in JSON")
 PY
 
   if [ -n "$vendor_regex" ]; then

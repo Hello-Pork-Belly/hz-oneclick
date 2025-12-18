@@ -252,7 +252,7 @@ baseline_wrapper_write_json_report() {
 }
 
 baseline_wrapper_build_json_payload() {
-  local group domain lang verdict hint report_path report_json_path
+  local group domain lang verdict hint report_path report_json_path format
   group="$1"
   domain="$2"
   lang="$3"
@@ -260,6 +260,7 @@ baseline_wrapper_build_json_payload() {
   hint="$5"
   report_path="$6"
   report_json_path="$7"
+  format="${8:-json}"
 
   local total idx keyword evidence suggestions evidence_fmt suggestions_fmt
   local -a evidence_lines=() suggestion_lines=()
@@ -291,7 +292,7 @@ baseline_wrapper_build_json_payload() {
     done <<< "$suggestions_fmt"
   done
 
-  local key_joined evidence_json suggestions_json group_key domain_safe lang_safe key_safe report_safe report_json_safe
+  local key_joined evidence_json suggestions_json group_key domain_safe lang_safe key_safe report_safe report_json_safe keyword_safe
   key_joined="$(baseline_wrapper_collect_keywords_joined)"
   evidence_json="$(baseline_wrapper_json_array_from_lines "$(printf '%s\n' "${evidence_lines[@]}")")"
   suggestions_json="$(baseline_wrapper_json_array_from_lines "$(printf '%s\n' "${suggestion_lines[@]}")")"
@@ -301,6 +302,7 @@ baseline_wrapper_build_json_payload() {
   lang_safe="$(baseline_wrapper_sanitize_json_text "$lang")"
   key_safe="$(baseline_wrapper_sanitize_json_text "$key_joined")"
   group_key="$(baseline_wrapper_sanitize_json_text "$group_key")"
+  keyword_safe="$key_safe"
   verdict="$(baseline_wrapper_sanitize_json_text "$verdict")"
   hint="$(baseline_wrapper_sanitize_json_text "$hint")"
   report_safe="$(baseline_wrapper_sanitize_json_text "$report_path")"
@@ -309,12 +311,15 @@ baseline_wrapper_build_json_payload() {
   local generated_at
   generated_at="$(baseline_wrapper_sanitize_json_text "$(date -u +"%Y-%m-%dT%H:%M:%SZ")")"
 
-  printf '{"schema_version":"1.0","generated_at":"%s","tool":"hz-oneclick","mode":"baseline-diagnostics","lang":"%s","domain":"%s","results":[{"group":"%s","key":"%s","verdict":"%s","hint":"%s","evidence":[%s],"suggestions":[%s],"report":"%s","report_json":"%s"}]}' \
+  printf '{"schema_version":"1.0","generated_at":"%s","format":"%s","tool":"hz-oneclick","mode":"baseline-diagnostics","lang":"%s","domain":"%s","results":[{"group":"%s","key":"%s","keyword":"%s","state":"%s","verdict":"%s","hint":"%s","evidence":[%s],"suggestions":[%s],"report":"%s","report_json":"%s"}]}' \
     "$(baseline_json_escape "$generated_at")" \
+    "$(baseline_json_escape "$format")" \
     "$(baseline_json_escape "$lang_safe")" \
     "$(baseline_json_escape "$domain_safe")" \
     "$(baseline_json_escape "$group_key")" \
     "$(baseline_json_escape "$key_safe")" \
+    "$(baseline_json_escape "$keyword_safe")" \
+    "$(baseline_json_escape "$verdict")" \
     "$(baseline_json_escape "$verdict")" \
     "$(baseline_json_escape "$hint")" \
     "$evidence_json" "$suggestions_json" \
@@ -429,7 +434,7 @@ baseline_wrapper_finalize() {
   if [ "$format" = "json" ]; then
     local json_payload report_json_path
     report_json_path="${report_path%.txt}.json"
-    json_payload="$(baseline_wrapper_build_json_payload "$group" "$domain" "$lang" "$overall" "$reason" "$report_path" "$report_json_path")"
+    json_payload="$(baseline_wrapper_build_json_payload "$group" "$domain" "$lang" "$overall" "$reason" "$report_path" "$report_json_path" "$format")"
     baseline_wrapper_write_json_report "$json_payload" "$report_json_path"
     printf '%s\n' "$json_payload"
     return

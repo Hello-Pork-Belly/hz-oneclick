@@ -10,11 +10,93 @@ forbidden_terms_b64=(
   "QXp1cmU="
 )
 forbidden_terms=()
+SCHEMA_PATH="./docs/schema/baseline_diagnostics.schema.json"
 for term_b64 in "${forbidden_terms_b64[@]}"; do
   if decoded_term=$(printf '%s' "$term_b64" | base64 -d 2>/dev/null); then
     forbidden_terms+=("$decoded_term")
   fi
 done
+
+validate_json_file() {
+  local json_path expected_group
+  json_path="$1"
+  expected_group="${2:-}"
+
+  if [ ! -f "$SCHEMA_PATH" ]; then
+    echo "[smoke] schema file missing at ${SCHEMA_PATH}" >&2
+    exit 1
+  fi
+
+  JSON_PATH="$json_path" SCHEMA_PATH="$SCHEMA_PATH" python3 - "$expected_group" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+json_path = Path(os.environ.get("JSON_PATH", ""))
+schema_path = Path(os.environ.get("SCHEMA_PATH", ""))
+expected = sys.argv[1] if len(sys.argv) > 1 else ""
+
+if not json_path.is_file():
+    print(f"json report missing: {json_path}", file=sys.stderr)
+    sys.exit(1)
+if not schema_path.is_file():
+    print(f"schema missing: {schema_path}", file=sys.stderr)
+    sys.exit(1)
+
+data = json.loads(json_path.read_text())
+schema = json.loads(schema_path.read_text())
+
+def fail(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+def ensure_required(obj: dict, required, ctx: str) -> None:
+    for key in required:
+        if key not in obj:
+            fail(f"{ctx} missing field: {key}")
+
+def ensure_string(obj: dict, key: str, ctx: str) -> None:
+    if key in obj and not isinstance(obj[key], str):
+        fail(f"{ctx} field {key} is not a string")
+
+ensure_required(data, schema.get("required", []), "top-level")
+for field in ("schema_version", "generated_at", "format", "lang", "domain"):
+    ensure_string(data, field, "top-level")
+
+if not isinstance(data.get("results"), list) or not data["results"]:
+    fail("results array empty or invalid")
+
+result_schema = schema.get("definitions", {}).get("result", {})
+for idx, item in enumerate(data["results"]):
+    if not isinstance(item, dict):
+        fail(f"results[{idx}] is not an object")
+    ensure_required(item, result_schema.get("required", []), f"results[{idx}]")
+    for field in ("group", "key", "keyword", "state", "verdict", "hint"):
+        ensure_string(item, field, f"results[{idx}]")
+    if item.get("state") not in (None, "PASS", "WARN", "FAIL"):
+        fail(f"invalid state in results[{idx}]: {item.get('state')}")
+
+    if idx == 0 and expected and item.get("group") != expected:
+        fail(f"group mismatch: {item.get('group')} != {expected}")
+
+    for arr_field in ("evidence", "suggestions"):
+        if not isinstance(item.get(arr_field), list):
+            fail(f"{arr_field} is not a list in results[{idx}]")
+        for arr_idx, entry in enumerate(item.get(arr_field)):
+            if not isinstance(entry, str):
+                fail(f"{arr_field}[{arr_idx}] is not a string in results[{idx}]")
+
+    for path_field in ("report", "report_json"):
+        path_val = item.get(path_field)
+        if path_val and not os.path.isfile(path_val):
+            fail(f"missing report file: {path_val}")
+
+if expected and data.get("results"):
+    if data["results"][0].get("group") != expected:
+        fail(f"expected group {expected}, got {data['results'][0].get('group')}")
+PY
+}
 
 echo "[smoke] collecting shell scripts (excluding modules/)"
 mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './modules/*' -print0)
@@ -224,10 +306,7 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
     exit 1
   fi
   head -n1 "$json_report_path" | grep -q "^{"
-  python3 -m json.tool "$json_report_path" >/dev/null
-  python3 -m json.tool "$json_report_path" | grep -Eq '"schema_version"'
-  python3 -m json.tool "$json_report_path" | grep -Eq '"results"'
-  python3 -m json.tool "$json_report_path" | grep -Eq '"hint"'
+  validate_json_file "$json_report_path"
 
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
     regex=$(IFS='|'; echo "${forbidden_terms[*]}")
@@ -263,13 +342,7 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
     exit 1
   fi
   head -n1 "$standalone_json_report" | grep -q "^{"
-  if ! python3 -m json.tool "$standalone_json_report" >/dev/null; then
-    echo "[smoke] quick-triage JSON report is not valid JSON" >&2
-    exit 1
-  fi
-  python3 -m json.tool "$standalone_json_report" | grep -Eq '"schema_version"' || { echo "[smoke] schema_version missing in triage JSON" >&2; exit 1; }
-  python3 -m json.tool "$standalone_json_report" | grep -Eq '"results"' || { echo "[smoke] results missing in triage JSON" >&2; exit 1; }
-  python3 -m json.tool "$standalone_json_report" | grep -Eq '"hint"' || { echo "[smoke] hint missing in triage JSON" >&2; exit 1; }
+  validate_json_file "$standalone_json_report"
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
     regex=$(IFS='|'; echo "${forbidden_terms[*]}")
     if matches=$(grep -Eina "$regex" "$standalone_json_report" || true) && [ -n "$matches" ]; then
