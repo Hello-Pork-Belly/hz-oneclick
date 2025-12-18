@@ -240,6 +240,23 @@ baseline_triage__json_array_from_lines() {
   done <<< "$data"
 }
 
+baseline_triage__mock_tls_sclient_output() {
+  cat <<'MOCK_TRIAGE_SCLIENT'
+0
+CONNECTED(00000003)
+Certificate chain
+ 0 s:CN = mock.example.com
+   i:CN = Mock Test CA
+Server certificate
+-----BEGIN CERTIFICATE-----
+MIIBmockcertdata
+-----END CERTIFICATE-----
+subject=CN = mock.example.com
+issuer=CN = Mock Test CA
+Verify return code: 0 (ok)
+MOCK_TRIAGE_SCLIENT
+}
+
 baseline_triage__setup_test_mode() {
   if [ "${BASELINE_TEST_MODE:-0}" != "1" ]; then
     return 0
@@ -430,20 +447,7 @@ MOCKTIMEOUT
     printf "0\nsubject=CN=mock.example.com\nissuer=CN=Mock Test CA\nVerify return code: 0 (ok)\n"
   }
   baseline_tls__run_sclient() {
-    cat <<'MOCK_TRIAGE_SCLIENT'
-0
-CONNECTED(00000003)
-Certificate chain
- 0 s:CN = mock.example.com
-   i:CN = Mock Test CA
-Server certificate
------BEGIN CERTIFICATE-----
-MIIBmockcertdata
------END CERTIFICATE-----
-subject=CN = mock.example.com
-issuer=CN = Mock Test CA
-Verify return code: 0 (ok)
-MOCK_TRIAGE_SCLIENT
+    baseline_triage__mock_tls_sclient_output
   }
 }
 

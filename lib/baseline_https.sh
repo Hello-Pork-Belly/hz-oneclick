@@ -48,6 +48,7 @@ baseline_https_run() {
   local domain lang group listen80 listen443 http_status https_status
   local listen80_state listen443_state http_state https_state
   local suggestions_http suggestions_https keyword_https keys_to_add=()
+  local listen80_keyword listen80_suggestion listen443_keyword listen443_suggestion
   local tls_mismatch=0 evidence_http evidence_https evidence_listen
 
   domain="$1"
@@ -117,15 +118,39 @@ baseline_https_run() {
     suggestions_https="HTTPS 访问异常，请检查证书与代理模式是否匹配。"
   fi
 
+  if [ "$listen80_state" = "FAIL" ]; then
+    listen80_keyword="PORT_80_BLOCKED"
+    if [ "$lang" = "en" ]; then
+      listen80_suggestion="Confirm firewall/security rules allow port 80 and the service is listening."
+    else
+      listen80_suggestion="检查系统防火墙与安全规则是否放行 80；确认服务已监听该端口。"
+    fi
+  else
+    listen80_keyword="LISTEN_80"
+    listen80_suggestion=""
+  fi
+
+  if [ "$listen443_state" = "FAIL" ]; then
+    listen443_keyword="PORT_443_BLOCKED"
+    if [ "$lang" = "en" ]; then
+      listen443_suggestion="Confirm firewall/security rules allow port 443 and the service is listening."
+    else
+      listen443_suggestion="检查系统防火墙与安全规则是否放行 443；确认服务已监听该端口。"
+    fi
+  else
+    listen443_keyword="LISTEN_443"
+    listen443_suggestion=""
+  fi
+
   baseline_add_result "$group" "LISTEN_80" "$listen80_state" \
-    "$([ "$listen80_state" = "FAIL" ] && echo "PORT_80_BLOCKED" || echo "LISTEN_80")" \
+    "$listen80_keyword" \
     "${evidence_listen%%\n*}" \
-    "$([ "$listen80_state" = "FAIL" ] && echo "$( [ "$lang" = "en" ] && echo "Confirm firewall/security rules allow port 80 and the service is listening." || echo "检查系统防火墙与安全规则是否放行 80；确认服务已监听该端口。")" || echo "")"
+    "$listen80_suggestion"
 
   baseline_add_result "$group" "LISTEN_443" "$listen443_state" \
-    "$([ "$listen443_state" = "FAIL" ] && echo "PORT_443_BLOCKED" || echo "LISTEN_443")" \
+    "$listen443_keyword" \
     "${evidence_listen#*\n}" \
-    "$([ "$listen443_state" = "FAIL" ] && echo "$( [ "$lang" = "en" ] && echo "Confirm firewall/security rules allow port 443 and the service is listening." || echo "检查系统防火墙与安全规则是否放行 443；确认服务已监听该端口。")" || echo "")"
+    "$listen443_suggestion"
 
   baseline_add_result "$group" "HTTP_STATUS" "$http_state" "HTTP_STATUS" \
     "$evidence_http" \
