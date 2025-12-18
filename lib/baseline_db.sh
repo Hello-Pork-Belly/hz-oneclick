@@ -156,7 +156,7 @@ baseline_db_run() {
   fi
 
   if [ -n "$db_name" ]; then
-    select_cmd=$(printf 'USE `%s`; SELECT 1;' "$db_name")
+    select_cmd="USE \`$db_name\`; SELECT 1;"
   else
     select_cmd="SELECT 1;"
   fi
