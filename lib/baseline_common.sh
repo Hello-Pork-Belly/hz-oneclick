@@ -39,8 +39,26 @@ baseline_vendor_scrub_text() {
   fi
 
   vendor_pattern=$(IFS='|'; echo "${vendor_terms[*]}")
-  sed -E \
-    -e "s/(${vendor_pattern})/cloud provider/Ig"
+    sed -E \
+      -e "s/(${vendor_pattern})/cloud provider/Ig"
+}
+
+baseline_json_sanitize_field() {
+  # Apply secret redaction and vendor-neutral wording to any JSON string field.
+  local input sanitized
+  input="$1"
+
+  if declare -f baseline_sanitize_text >/dev/null 2>&1; then
+    sanitized="$(printf "%s" "$input" | baseline_sanitize_text)"
+  else
+    sanitized="$input"
+  fi
+
+  if declare -f baseline_vendor_scrub_text >/dev/null 2>&1; then
+    sanitized="$(printf "%s" "$sanitized" | baseline_vendor_scrub_text)"
+  fi
+
+  printf "%s" "$sanitized"
 }
 
 baseline_json_escape() {

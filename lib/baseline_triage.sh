@@ -164,8 +164,12 @@ baseline_triage__sanitize_text() {
 baseline_triage__sanitize_json_text() {
   local text
   text="$1"
-  text="$(printf "%s" "$text" | baseline_triage__sanitize_text)"
-  text="$(printf "%s" "$text" | baseline_vendor_scrub_text)"
+  if declare -f baseline_json_sanitize_field >/dev/null 2>&1; then
+    text="$(baseline_json_sanitize_field "$text")"
+  else
+    text="$(printf "%s" "$text" | baseline_triage__sanitize_text)"
+    text="$(printf "%s" "$text" | baseline_vendor_scrub_text)"
+  fi
   printf "%s" "$text"
 }
 
@@ -513,8 +517,9 @@ baseline_triage__write_json_report() {
   overall="$4"
   report_path="$5"
 
-  local keywords_json keywords_lines
-  local -a keywords=()
+  local generated_at
+  generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
   local -a groups_order=(dns_ip origin_firewall proxy_cdn tls_https lsws_ols wp_app cache_redis system_resource)
   local total idx group key_name status keyword evidence suggestions evidence_fmt suggestions_fmt token ev_line sug_line
   declare -A group_status=()
@@ -524,8 +529,6 @@ baseline_triage__write_json_report() {
   declare -A seen_key_item=()
   declare -A seen_evidence=()
   declare -A seen_suggestion=()
-
-  keywords_lines="$(baseline_triage__collect_keywords)"
 
   total=${#BASELINE_RESULTS_STATUS[@]}
   for ((idx=0; idx<total; idx++)); do
@@ -572,34 +575,58 @@ baseline_triage__write_json_report() {
     done <<< "$suggestions_fmt"
   done
 
-  keywords_json="$(baseline_triage__json_array_from_lines "$keywords_lines")"
-
   domain="$(baseline_triage__sanitize_json_text "$domain")"
   lang="$(baseline_triage__sanitize_json_text "$lang")"
   ts="$(baseline_triage__sanitize_json_text "$ts")"
+  generated_at="$(baseline_triage__sanitize_json_text "$generated_at")"
+  overall="$(baseline_triage__sanitize_json_text "$overall")"
 
   umask 077
   {
     printf '{\n'
-    printf '  "metadata": {"timestamp": "%s", "domain": "%s", "lang": "%s", "format_version": "1.0"},\n' \
-      "$(baseline_json_escape "$ts")" "$(baseline_json_escape "$domain")" "$(baseline_json_escape "$lang")"
-    printf '  "summary": {"verdict": "%s", "keywords": [%s]},\n' "$overall" "$keywords_json"
-    printf '  "groups": {\n'
-    for idx in "${!groups_order[@]}"; do
-      key_name="${groups_order[$idx]}"
-      status="${group_status[$key_name]:-PASS}"
-      key_line_json="$(baseline_triage__json_array_from_lines "${group_key_items[$key_name]:-}")"
-      evidence_json="$(baseline_triage__json_array_from_lines "${group_evidence[$key_name]:-}")"
-      suggestions_json="$(baseline_triage__json_array_from_lines "${group_suggestions[$key_name]:-}")"
+    printf '  "schema_version": "1.0",\n'
+    printf '  "generated_at": "%s",\n' "$(baseline_json_escape "$generated_at")"
+    printf '  "lang": "%s",\n' "$(baseline_json_escape "$lang")"
+    printf '  "domain": "%s",\n' "$(baseline_json_escape "$domain")"
+    printf '  "verdict": "%s",\n' "$(baseline_json_escape "$overall")"
+    printf '  "results": [\n'
 
-      printf '    "%s": {"group": "%s", "status": "%s", "key_items": [%s], "evidence": [%s], "suggestions": [%s]}' \
-        "$key_name" "$key_name" "$status" "$key_line_json" "$evidence_json" "$suggestions_json"
-      if [ "$idx" -lt $(( ${#groups_order[@]} - 1 )) ]; then
-        printf ','
+    local result_index=0
+    for key_name in "${groups_order[@]}"; do
+      local key_id
+      key_id="$key_name"
+      status="${group_status[$key_id]:-PASS}"
+      status="$(baseline_triage__sanitize_json_text "$status")"
+      key_name="$(baseline_triage__sanitize_json_text "$key_name")"
+      local key_line evidence_json suggestions_json hint_line
+      key_line="$(printf '%s' "${group_key_items[$key_id]:-}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+      key_line="$(baseline_triage__sanitize_json_text "$key_line")"
+      evidence_json="$(baseline_triage__json_array_from_lines "${group_evidence[$key_id]:-}")"
+      suggestions_json="$(baseline_triage__json_array_from_lines "${group_suggestions[$key_id]:-}")"
+
+      hint_line="$(printf '%s' "${group_suggestions[$key_id]:-}" | sed -n '1p')"
+      if [ -z "$hint_line" ]; then
+        hint_line="$(printf '%s' "${group_evidence[$key_id]:-}" | sed -n '1p')"
       fi
-      printf '\n'
+      if [ -z "$hint_line" ]; then
+        hint_line="$status"
+      fi
+      hint_line="$(baseline_triage__sanitize_json_text "$hint_line")"
+
+      if [ $result_index -gt 0 ]; then
+        printf ',\n'
+      fi
+      printf '    {"group": "%s", "key": "%s", "verdict": "%s", "hint": "%s", "evidence": [%s], "suggestions": [%s]}' \
+        "$(baseline_json_escape "$key_name")" \
+        "$(baseline_json_escape "$key_line")" \
+        "$(baseline_json_escape "$status")" \
+        "$(baseline_json_escape "$hint_line")" \
+        "$evidence_json" \
+        "$suggestions_json"
+      result_index=$((result_index + 1))
     done
-    printf '  }\n'
+
+    printf '\n  ]\n'
     printf '}\n'
   } > "$report_path"
   chmod 600 "$report_path" 2>/dev/null || true

@@ -224,14 +224,10 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
     exit 1
   fi
   head -n1 "$json_report_path" | grep -q "^{"
-  grep -q '"metadata"' "$json_report_path"
-  grep -q '"summary"' "$json_report_path"
-  grep -q '"groups"' "$json_report_path"
-
-  if ! python3 -m json.tool "$json_report_path" >/dev/null; then
-    echo "[smoke] triage JSON report is not valid JSON" >&2
-    exit 1
-  fi
+  python3 -m json.tool "$json_report_path" >/dev/null
+  python3 -m json.tool "$json_report_path" | grep -Eq '"schema_version"'
+  python3 -m json.tool "$json_report_path" | grep -Eq '"results"'
+  python3 -m json.tool "$json_report_path" | grep -Eq '"hint"'
 
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
     regex=$(IFS='|'; echo "${forbidden_terms[*]}")
@@ -267,11 +263,13 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
     exit 1
   fi
   head -n1 "$standalone_json_report" | grep -q "^{"
-  grep -q '"summary"' "$standalone_json_report"
   if ! python3 -m json.tool "$standalone_json_report" >/dev/null; then
     echo "[smoke] quick-triage JSON report is not valid JSON" >&2
     exit 1
   fi
+  python3 -m json.tool "$standalone_json_report" | grep -Eq '"schema_version"' || { echo "[smoke] schema_version missing in triage JSON" >&2; exit 1; }
+  python3 -m json.tool "$standalone_json_report" | grep -Eq '"results"' || { echo "[smoke] results missing in triage JSON" >&2; exit 1; }
+  python3 -m json.tool "$standalone_json_report" | grep -Eq '"hint"' || { echo "[smoke] hint missing in triage JSON" >&2; exit 1; }
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
     regex=$(IFS='|'; echo "${forbidden_terms[*]}")
     if matches=$(grep -Eina "$regex" "$standalone_json_report" || true) && [ -n "$matches" ]; then

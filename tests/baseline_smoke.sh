@@ -108,15 +108,19 @@ forbidden_terms_b64=(
   "QXp1cmU="
 )
 forbidden_terms=()
+vendor_regex=""
 for term_b64 in "${forbidden_terms_b64[@]}"; do
   if decoded_term=$(printf '%s' "$term_b64" | base64 -d 2>/dev/null); then
     forbidden_terms+=("$decoded_term")
   fi
 done
 
-if [ ${#filtered_paths[@]} -gt 0 ] && [ ${#forbidden_terms[@]} -gt 0 ]; then
-  regex=$(IFS='|'; echo "${forbidden_terms[*]}")
-  if grep -RIn -Ei "$regex" "${filtered_paths[@]}"; then
+if [ ${#forbidden_terms[@]} -gt 0 ]; then
+  vendor_regex=$(IFS='|'; echo "${forbidden_terms[*]}")
+fi
+
+if [ ${#filtered_paths[@]} -gt 0 ] && [ -n "$vendor_regex" ]; then
+  if grep -RIn -Ei "$vendor_regex" "${filtered_paths[@]}"; then
     echo "[baseline-smoke] vendor names should not appear in repository" >&2
     exit 1
   fi
@@ -218,12 +222,17 @@ fi
 
 echo "[baseline-smoke] wrapper json output"
 validate_wrapper_json() {
-  local json_output expected_group regex_pattern
+  local json_output expected_group regex_pattern pretty
   json_output="$1"
   expected_group="$2"
   regex_pattern="$3"
 
-  echo "$json_output" | python3 -m json.tool >/dev/null
+  pretty="$(echo "$json_output" | python3 -m json.tool)"
+
+  printf "%s" "$pretty" | grep -Eq '"schema_version"' || { echo "[baseline-smoke] schema_version missing" >&2; exit 1; }
+  printf "%s" "$pretty" | grep -Eq '"generated_at"' || { echo "[baseline-smoke] generated_at missing" >&2; exit 1; }
+  printf "%s" "$pretty" | grep -Eq '"results"' || { echo "[baseline-smoke] results array missing" >&2; exit 1; }
+  printf "%s" "$pretty" | grep -Eq '"hint"' || { echo "[baseline-smoke] hint field missing" >&2; exit 1; }
 
   JSON_DATA="$json_output" python3 - "$expected_group" "$regex_pattern" <<'PY'
 import json
@@ -235,27 +244,32 @@ data = json.loads(os.environ.get("JSON_DATA", "{}"))
 expected = sys.argv[1]
 regex = sys.argv[2]
 
-for required in ("group", "verdict", "key"):
+for required in ("schema_version", "generated_at", "lang", "domain", "results"):
     if required not in data:
         print(f"missing field: {required}", file=sys.stderr)
         sys.exit(1)
 
-for fixed_key, expected_val in ("tool", "hz-oneclick"), ("mode", "baseline-diagnostics"):
-    if data.get(fixed_key) != expected_val:
-        print(f"unexpected {fixed_key}: {data.get(fixed_key)}", file=sys.stderr)
-        sys.exit(1)
-
-if expected and data.get("group") != expected:
-    print(f"group mismatch: {data.get('group')} != {expected}", file=sys.stderr)
+if not isinstance(data.get("results"), list) or not data["results"]:
+    print("results array empty or invalid", file=sys.stderr)
     sys.exit(1)
 
-for list_field in ("evidence", "suggestions"):
-    if list_field not in data or not isinstance(data[list_field], list):
-        print(f"missing list field: {list_field}", file=sys.stderr)
+item = data["results"][0]
+for field in ("group", "key", "verdict", "hint", "evidence", "suggestions"):
+    if field not in item:
+        print(f"missing result field: {field}", file=sys.stderr)
+        sys.exit(1)
+
+if expected and item.get("group") != expected:
+    print(f"group mismatch: {item.get('group')} != {expected}", file=sys.stderr)
+    sys.exit(1)
+
+for arr_field in ("evidence", "suggestions"):
+    if not isinstance(item.get(arr_field), list):
+        print(f"{arr_field} is not a list", file=sys.stderr)
         sys.exit(1)
 
 for path_field in ("report", "report_json"):
-    path_val = data.get(path_field)
+    path_val = item.get(path_field)
     if path_val and not os.path.isfile(path_val):
         print(f"missing report file: {path_val}", file=sys.stderr)
         sys.exit(1)
@@ -266,21 +280,28 @@ if regex:
         print("forbidden vendor wording found in JSON", file=sys.stderr)
         sys.exit(1)
 PY
+
+  if [ -n "$vendor_regex" ]; then
+    if printf "%s" "$json_output" | grep -Eiq "$vendor_regex"; then
+      echo "[baseline-smoke] vendor wording found in JSON output" >&2
+      exit 1
+    fi
+  fi
 }
 
 if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
   dns_json_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en" --format json)"
-  validate_wrapper_json "$dns_json_output" "dns-ip" "${regex:-}"
+  validate_wrapper_json "$dns_json_output" "dns-ip" "$vendor_regex"
 fi
 
 if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" ]; then
   tls_json_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" "example.com" "en" --format json)"
-  validate_wrapper_json "$tls_json_output" "tls-https" "${regex:-}"
+  validate_wrapper_json "$tls_json_output" "tls-https" "$vendor_regex"
 fi
 
 if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" ]; then
   cache_json_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" --format json)"
-  validate_wrapper_json "$cache_json_output" "cache-redis" "${regex:-}"
+  validate_wrapper_json "$cache_json_output" "cache-redis" "$vendor_regex"
 fi
 
 

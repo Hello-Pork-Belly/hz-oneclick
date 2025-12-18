@@ -57,11 +57,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
   - `REPORT: <文本报告路径>`
   - `REPORT_JSON: <JSON 报告路径>`
 - JSON 与文本报告同样经过脱敏处理，措辞保持供应商中立（以 `abc.yourdomain.com` 等占位符为例）。
+- JSON 输出包含 `schema_version`、`generated_at` 等标准字段，方便脚本或 CI 校验结构。
 
 ## Baseline Diagnostics 菜单入口
 
 - 运行 `hz.sh` 后，可在主菜单中选择「Baseline Diagnostics / 基础诊断」进入单独的诊断子菜单（先选择语言、可选输入域名）。
 - 子菜单提供一键 Quick Triage，也可以按组单独运行（DNS/IP、源站/防火墙、代理/CDN、TLS/HTTPS、LSWS/OLS、WP/App、缓存/Redis/OPcache、系统/资源）。
+- 所有诊断脚本支持 `--format text|json`（默认 text），保持人类可读输出不变的同时提供 JSON 报告。
 - 示例命令：
 
 ```bash
