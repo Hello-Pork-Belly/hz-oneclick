@@ -127,9 +127,11 @@ baseline_lsws__detect_conflicts() {
 baseline_lsws_run() {
   # Usage: baseline_lsws_run "<domain_optional>" "<lang_optional>"
   local domain lang group lsws_state lsws_evidence lsws_keyword lsws_suggestion
+  # shellcheck disable=SC2034
   local listen80 listen443 listen7080 listen_status listen_evidence
   local http_status http_ev https_status https_ev admin_status admin_ev
   local conflict_status conflict_ev config_status config_ev log_status log_ev
+  # shellcheck disable=SC2034
   local version output keywords log_keywords log_tail evidence_lines suggestions_lines
 
   domain="$1"

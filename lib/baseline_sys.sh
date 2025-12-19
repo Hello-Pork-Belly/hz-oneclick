@@ -243,6 +243,7 @@ baseline_sys_run() {
   fi
 
   if [ -d /var/log ]; then
+    # shellcheck disable=SC2012
     logs_listing="$(ls -lhS /var/log 2>/dev/null | head -n 20 || true)"
     if [ -z "$logs_listing" ]; then
       logs_listing="(empty)"
@@ -267,4 +268,3 @@ baseline_sys_run() {
     baseline_add_result "$group" "BLOCK_DEV" "PASS" "" "lsblk -f:\n${lsblk_out}" ""
   fi
 }
-
