@@ -8,6 +8,7 @@ HZ_TRIAGE_USE_LOCAL="${HZ_TRIAGE_USE_LOCAL:-0}"
 HZ_TRIAGE_LOCAL_ROOT="${HZ_TRIAGE_LOCAL_ROOT:-$(pwd)}"
 HZ_TRIAGE_FORMAT="${HZ_TRIAGE_FORMAT:-text}"
 HZ_TRIAGE_REDACT="${HZ_TRIAGE_REDACT:-0}"
+HZ_TRIAGE_SMOKE="${HZ_TRIAGE_SMOKE:-0}"
 
 if [ "${HZ_TRIAGE_TEST_MODE:-0}" = "1" ] && [ "${BASELINE_TEST_MODE:-0}" != "1" ]; then
   BASELINE_TEST_MODE=1
@@ -124,8 +125,12 @@ parse_args() {
         HZ_TRIAGE_REDACT=1
         shift
         ;;
+      --smoke|--exit0|--no-fail)
+        HZ_TRIAGE_SMOKE=1
+        shift
+        ;;
       --help)
-        echo "Usage: $0 [--format text|json] [--redact]"
+        echo "Usage: $0 [--format text|json] [--redact] [--smoke|--exit0|--no-fail]"
         exit 0
         ;;
       *)
@@ -174,6 +179,11 @@ main() {
   echo
   domain="$(prompt_domain "$lang")"
   echo
+
+  if [ "$HZ_TRIAGE_SMOKE" = "1" ]; then
+    HZ_CI_SMOKE=1
+    export HZ_CI_SMOKE
+  fi
 
   run_triage "$lang" "$domain" "$HZ_TRIAGE_FORMAT"
 }

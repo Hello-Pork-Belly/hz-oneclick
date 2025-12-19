@@ -104,6 +104,17 @@ baseline_triage__normalize_format() {
   esac
 }
 
+baseline_triage__smoke_enabled() {
+  case "${HZ_CI_SMOKE:-${HZ_SMOKE:-0}}" in
+    1|true|TRUE|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 baseline_triage__timestamp() {
   date +%Y%m%d-%H%M%S
 }
@@ -666,10 +677,13 @@ baseline_triage__write_json_report() {
 baseline_triage_run() {
   # Usage: baseline_triage_run "<domain>" "<lang>" "[format]"
   local domain lang format ts overall verdict_reason key_line report_path report_json_path summary_output details_output header_text safe_domain
+  local smoke_mode errexit_set
   domain="$1"
   lang="$(baseline_triage__normalize_lang "$2")"
   format="$(baseline_triage__normalize_format "${3:-text}")"
   report_json_path=""
+  smoke_mode=0
+  errexit_set=0
 
   BASELINE_LAST_REPORT_PATH=""
   BASELINE_LAST_REPORT_JSON_PATH=""
@@ -686,7 +700,21 @@ baseline_triage_run() {
   baseline_init
   baseline_triage__setup_test_mode
 
-  baseline_triage__run_groups "$domain" "$lang"
+  if baseline_triage__smoke_enabled; then
+    smoke_mode=1
+    case $- in
+      *e*)
+        errexit_set=1
+        set +e
+        ;;
+    esac
+    baseline_triage__run_groups "$domain" "$lang" || true
+    if [ "$errexit_set" -eq 1 ]; then
+      set -e
+    fi
+  else
+    baseline_triage__run_groups "$domain" "$lang"
+  fi
 
   summary_output="$(baseline_print_summary)"
   details_output="$(baseline_print_details)"
@@ -760,4 +788,7 @@ baseline_triage_run() {
   fi
 
   baseline_triage__teardown_test_mode
+  if [ "$smoke_mode" -eq 1 ]; then
+    return 0
+  fi
 }
