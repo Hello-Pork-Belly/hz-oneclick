@@ -142,17 +142,22 @@ parse_args() {
 }
 
 run_triage() {
-  local lang domain format output report_path sanitized_output
+  local lang domain format output report_path sanitized_output smoke_flag
   lang="$1"
   domain="$2"
   format="$3"
+  smoke_flag=""
 
   BASELINE_REDACT="$HZ_TRIAGE_REDACT"
   export BASELINE_REDACT
 
   BASELINE_WP_NO_PROMPT=1 export BASELINE_WP_NO_PROMPT
 
-  output="$(baseline_triage_run "$domain" "$lang" "$format")"
+  if [ "$HZ_TRIAGE_SMOKE" = "1" ]; then
+    smoke_flag="--smoke"
+  fi
+
+  output="$(baseline_triage_run "$domain" "$lang" "$format" "$smoke_flag")"
   sanitized_output="$(printf "%s" "$output" | sanitize_output)"
   echo "$sanitized_output"
 

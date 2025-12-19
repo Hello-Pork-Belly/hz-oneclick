@@ -98,6 +98,28 @@ if expected and data.get("results"):
 PY
 }
 
+assert_json_valid() {
+  local json_path
+  json_path="$1"
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -e . "$json_path" >/dev/null
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "$json_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+json_path = Path(sys.argv[1])
+if not json_path.is_file():
+    raise SystemExit(1)
+json.loads(json_path.read_text())
+PY
+  else
+    grep -q "^{.*" "$json_path"
+  fi
+}
+
 find_latest_triage_json() {
   find /tmp -maxdepth 1 -type f -name 'hz-baseline-triage-*.json' -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk 'NR==1{print $2}'
 }
@@ -291,7 +313,7 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
     fi
   done
 
-  triage_output="$( ( BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" ) )"
+  triage_output="$( ( BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke ) )"
   echo "$triage_output" | grep -q "^VERDICT:"
   echo "$triage_output" | grep -q "^KEY:"
   report_path="$(echo "$triage_output" | awk '/^REPORT:/ {print $2}')"
@@ -302,7 +324,7 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
   grep -q "HZ Quick Triage Report" "$report_path"
   grep -q "Baseline Diagnostics Summary" "$report_path"
 
-  triage_json_output="$( ( BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" "json" ) )"
+  triage_json_output="$( ( BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" "json" --smoke ) )"
   echo "$triage_json_output" | grep -q "^REPORT_JSON:"
   json_report_path="$(echo "$triage_json_output" | awk '/^REPORT_JSON:/ {print $2}')"
   if [ -z "$json_report_path" ] || [ ! -f "$json_report_path" ]; then
@@ -310,6 +332,7 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
     exit 1
   fi
   head -n1 "$json_report_path" | grep -q "^{"
+  assert_json_valid "$json_report_path"
   validate_json_file "$json_report_path"
 
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
@@ -323,13 +346,14 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
 
   echo "[smoke] baseline_triage redacted json run"
   redacted_output_file="$(mktemp)"
-  HZ_CI_SMOKE=1 BASELINE_TEST_MODE=1 BASELINE_REDACT=1 baseline_triage_run "triage.example.com" "en" "json" > "$redacted_output_file"
+  HZ_CI_SMOKE=1 BASELINE_TEST_MODE=1 BASELINE_REDACT=1 baseline_triage_run "triage.example.com" "en" "json" --smoke > "$redacted_output_file"
   grep -q "^REPORT_JSON:" "$redacted_output_file"
   redacted_json_path="${BASELINE_LAST_REPORT_JSON_PATH:-}"
   if [ -z "$redacted_json_path" ] || [ ! -f "$redacted_json_path" ]; then
     echo "[smoke] redacted triage JSON report missing" >&2
     exit 1
   fi
+  assert_json_valid "$redacted_json_path"
   validate_json_file "$redacted_json_path"
   grep -qi "<redacted" "$redacted_json_path"
   rm -f "$redacted_output_file"
@@ -339,7 +363,7 @@ fi
 
 echo "[smoke] quick triage standalone runner"
 if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
-  triage_output="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh)"
+  triage_output="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --smoke)"
   echo "$triage_output" | grep -q "^VERDICT:"
   echo "$triage_output" | grep -q "^KEY:"
   echo "$triage_output" | grep -q "^REPORT:"
@@ -351,7 +375,7 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
   grep -q "HZ Quick Triage Report" "$standalone_report"
   grep -q "Baseline Diagnostics Summary" "$standalone_report"
 
-  triage_output_json="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --format json)"
+  triage_output_json="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --format json --smoke)"
   echo "$triage_output_json" | grep -q "^REPORT_JSON:"
   standalone_json_report="$(echo "$triage_output_json" | awk '/^REPORT_JSON:/ {print $2}')"
   if [ -z "$standalone_json_report" ] || [ ! -f "$standalone_json_report" ]; then
@@ -359,6 +383,7 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
     exit 1
   fi
   head -n1 "$standalone_json_report" | grep -q "^{"
+  assert_json_valid "$standalone_json_report"
   validate_json_file "$standalone_json_report"
   if [ ${#forbidden_terms[@]} -gt 0 ]; then
     regex=$(IFS='|'; echo "${forbidden_terms[*]}")
@@ -371,13 +396,14 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
 
   echo "[smoke] quick triage standalone runner (redact mode)"
   before_latest_json="$(find_latest_triage_json)"
-  triage_output_json_redacted="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 bash ./modules/diagnostics/quick-triage.sh --format json --redact)"
+  triage_output_json_redacted="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 bash ./modules/diagnostics/quick-triage.sh --format json --redact --smoke)"
   echo "$triage_output_json_redacted" | grep -qi "<redacted"
   latest_json="$(find_latest_triage_json)"
   if [ -z "$latest_json" ] || { [ -n "$before_latest_json" ] && [ "$latest_json" = "$before_latest_json" ]; }; then
     echo "[smoke] no new redacted triage JSON report found" >&2
     exit 1
   fi
+  assert_json_valid "$latest_json"
   validate_json_file "$latest_json"
   grep -qi "<redacted" "$latest_json"
 else

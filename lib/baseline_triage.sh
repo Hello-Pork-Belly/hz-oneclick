@@ -105,6 +105,15 @@ baseline_triage__normalize_format() {
 }
 
 baseline_triage__smoke_enabled() {
+  local smoke_flag
+  smoke_flag="${1:-}"
+
+  case "$smoke_flag" in
+    --smoke|--exit0|--no-fail)
+      return 0
+      ;;
+  esac
+
   case "${HZ_CI_SMOKE:-${HZ_SMOKE:-0}}" in
     1|true|TRUE|yes|YES)
       return 0
@@ -675,12 +684,22 @@ baseline_triage__write_json_report() {
 }
 
 baseline_triage_run() {
-  # Usage: baseline_triage_run "<domain>" "<lang>" "[format]"
+  # Usage: baseline_triage_run "<domain>" "<lang>" "[format]" "[--smoke|--exit0|--no-fail]"
   local domain lang format ts overall verdict_reason key_line report_path report_json_path summary_output details_output header_text safe_domain
-  local smoke_mode errexit_set
+  local smoke_mode errexit_set smoke_flag format_arg
   domain="$1"
   lang="$(baseline_triage__normalize_lang "$2")"
-  format="$(baseline_triage__normalize_format "${3:-text}")"
+  format_arg="${3:-text}"
+  smoke_flag="${4:-}"
+
+  case "$format_arg" in
+    --smoke|--exit0|--no-fail)
+      smoke_flag="$format_arg"
+      format_arg="text"
+      ;;
+  esac
+
+  format="$(baseline_triage__normalize_format "$format_arg")"
   report_json_path=""
   smoke_mode=0
   errexit_set=0
@@ -700,7 +719,7 @@ baseline_triage_run() {
   baseline_init
   baseline_triage__setup_test_mode
 
-  if baseline_triage__smoke_enabled; then
+  if baseline_triage__smoke_enabled "$smoke_flag"; then
     smoke_mode=1
     case $- in
       *e*)
