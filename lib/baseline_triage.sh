@@ -114,7 +114,7 @@ baseline_triage__smoke_enabled() {
       ;;
   esac
 
-  case "${HZ_CI_SMOKE:-${HZ_SMOKE:-0}}" in
+  case "${HZ_CI_SMOKE:-0}" in
     1|true|TRUE|yes|YES)
       return 0
       ;;
@@ -684,20 +684,44 @@ baseline_triage__write_json_report() {
 }
 
 baseline_triage_run() {
-  # Usage: baseline_triage_run "<domain>" "<lang>" "[format]" "[--smoke|--exit0|--no-fail]"
+  # Usage: baseline_triage_run "<domain>" "<lang>" "[format|--format <val>|--format=<val>]" "[--smoke|--exit0|--no-fail]"
   local domain lang format ts overall verdict_reason key_line report_path report_json_path summary_output details_output header_text safe_domain
-  local smoke_mode errexit_set smoke_flag format_arg
+  local smoke_mode errexit_set smoke_flag format_arg format_set
   domain="$1"
   lang="$(baseline_triage__normalize_lang "$2")"
-  format_arg="${3:-text}"
-  smoke_flag="${4:-}"
+  shift 2 || true
+  format_arg="text"
+  smoke_flag=""
+  format_set=0
 
-  case "$format_arg" in
-    --smoke|--exit0|--no-fail)
-      smoke_flag="$format_arg"
-      format_arg="text"
-      ;;
-  esac
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format)
+        format_arg="${2:-$format_arg}"
+        format_set=1
+        shift 2
+        ;;
+      --format=*)
+        format_arg="${1#--format=}"
+        format_set=1
+        shift
+        ;;
+      --smoke|--exit0|--no-fail)
+        smoke_flag="$1"
+        shift
+        ;;
+      json|text)
+        if [ "$format_set" -eq 0 ]; then
+          format_arg="$1"
+          format_set=1
+        fi
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
 
   format="$(baseline_triage__normalize_format "$format_arg")"
   report_json_path=""
@@ -806,8 +830,15 @@ baseline_triage_run() {
     echo "REPORT_JSON: ${display_report_json_path}"
   fi
 
+  local exit_status
+  exit_status=0
+  if [ "$overall" != "PASS" ]; then
+    exit_status=1
+  fi
+
   baseline_triage__teardown_test_mode
   if [ "$smoke_mode" -eq 1 ]; then
     return 0
   fi
+  return "$exit_status"
 }

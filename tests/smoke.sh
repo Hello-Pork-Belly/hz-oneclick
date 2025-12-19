@@ -307,11 +307,29 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
   for lib in ./lib/baseline_https.sh ./lib/baseline_tls.sh ./lib/baseline_db.sh \
     ./lib/baseline_dns.sh ./lib/baseline_origin.sh ./lib/baseline_proxy.sh \
     ./lib/baseline_wp.sh ./lib/baseline_lsws.sh ./lib/baseline_cache.sh ./lib/baseline_sys.sh; do
-    if [ -r "$lib" ]; then
+  if [ -r "$lib" ]; then
       # shellcheck source=/dev/null
       . "$lib"
     fi
   done
+
+  echo "[smoke] baseline_triage exit-code regression"
+  (
+    baseline_triage__run_groups() {
+      baseline_add_result "TEST" "test_warn" "WARN" "TEST_WARN" "warn detected" "review warning"
+      return 2
+    }
+
+    if (set -e; BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en"); then
+      echo "[smoke] baseline_triage normal mode should allow non-zero exit" >&2
+      exit 1
+    fi
+
+    if ! (set -e; BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke); then
+      echo "[smoke] baseline_triage smoke mode should exit 0" >&2
+      exit 1
+    fi
+  )
 
   triage_output="$( ( BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke ) )"
   echo "$triage_output" | grep -q "^VERDICT:"
