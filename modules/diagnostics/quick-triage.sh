@@ -8,7 +8,8 @@ HZ_TRIAGE_USE_LOCAL="${HZ_TRIAGE_USE_LOCAL:-0}"
 HZ_TRIAGE_LOCAL_ROOT="${HZ_TRIAGE_LOCAL_ROOT:-$(pwd)}"
 HZ_TRIAGE_FORMAT="${HZ_TRIAGE_FORMAT:-text}"
 HZ_TRIAGE_REDACT="${HZ_TRIAGE_REDACT:-0}"
-HZ_TRIAGE_SMOKE="${HZ_TRIAGE_SMOKE:-0}"
+HZ_TRIAGE_SMOKE=0
+HZ_TRIAGE_ARGS=()
 
 if [ "${HZ_TRIAGE_TEST_MODE:-0}" = "1" ] && [ "${BASELINE_TEST_MODE:-0}" != "1" ]; then
   BASELINE_TEST_MODE=1
@@ -111,6 +112,7 @@ sanitize_output() {
 }
 
 parse_args() {
+  HZ_TRIAGE_ARGS=("$@")
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --format)
@@ -141,23 +143,42 @@ parse_args() {
   done
 }
 
+build_triage_args() {
+  local has_format has_smoke arg
+  has_format=0
+  has_smoke=0
+
+  for arg in "${HZ_TRIAGE_ARGS[@]}"; do
+    case "$arg" in
+      --format|--format=*|json|text)
+        has_format=1
+        ;;
+      --smoke|--exit0|--no-fail)
+        has_smoke=1
+        ;;
+    esac
+  done
+
+  if [ "$has_format" -eq 0 ] && [ -n "${HZ_TRIAGE_FORMAT:-}" ]; then
+    HZ_TRIAGE_ARGS+=(--format "$HZ_TRIAGE_FORMAT")
+  fi
+
+  if [ "$has_smoke" -eq 0 ] && [ "${HZ_CI_SMOKE:-0}" = "1" ]; then
+    HZ_TRIAGE_ARGS+=(--smoke)
+    HZ_TRIAGE_SMOKE=1
+  fi
+}
+
 run_triage() {
-  local lang domain format output report_path sanitized_output smoke_flag
+  local lang domain output report_path sanitized_output
   lang="$1"
   domain="$2"
-  format="$3"
-  smoke_flag=""
 
   BASELINE_REDACT="$HZ_TRIAGE_REDACT"
   export BASELINE_REDACT
 
   BASELINE_WP_NO_PROMPT=1 export BASELINE_WP_NO_PROMPT
-
-  if [ "$HZ_TRIAGE_SMOKE" = "1" ]; then
-    smoke_flag="--smoke"
-  fi
-
-  output="$(baseline_triage_run "$domain" "$lang" "$format" "$smoke_flag")"
+  output="$(baseline_triage_run "$domain" "$lang" "${HZ_TRIAGE_ARGS[@]}")"
   sanitized_output="$(printf "%s" "$output" | sanitize_output)"
   echo "$sanitized_output"
 
@@ -178,6 +199,7 @@ main() {
   load_libs
 
   parse_args "$@"
+  build_triage_args
 
   local lang domain
   lang="$(prompt_lang)"
@@ -185,12 +207,12 @@ main() {
   domain="$(prompt_domain "$lang")"
   echo
 
-  if [ "$HZ_TRIAGE_SMOKE" = "1" ]; then
+  if [ "$HZ_TRIAGE_SMOKE" = "1" ] || [ "${HZ_CI_SMOKE:-0}" = "1" ]; then
     HZ_CI_SMOKE=1
     export HZ_CI_SMOKE
   fi
 
-  run_triage "$lang" "$domain" "$HZ_TRIAGE_FORMAT"
+  run_triage "$lang" "$domain"
 }
 
 main "$@"
