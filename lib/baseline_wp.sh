@@ -214,6 +214,7 @@ baseline_wp_run() {
   # Usage: baseline_wp_run "<domain>" "<wp_path_optional>" "<lang>"
   local domain wp_path lang group structure_info structure_score markers evidence suggestions status keyword config_file config_status config_keyword
   local perm_info perm_status perm_keyword perm_evidence perm_suggestion backup_found wpcli_cmd cli_status cli_keyword cli_evidence cli_suggestion
+  # shellcheck disable=SC2034
   local siteurl homeurl info status_line suggestion_line
   local curl_status curl_keyword curl_evidence curl_suggestion
 
