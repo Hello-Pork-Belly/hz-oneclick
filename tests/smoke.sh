@@ -338,7 +338,11 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
       return 2
     }
 
-    if (set -e; BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en"); then
+    set +e
+    HZ_CI_SMOKE=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en"
+    normal_exit_code=$?
+    set -e
+    if [ "$normal_exit_code" -eq 0 ]; then
       echo "[smoke] baseline_triage normal mode should allow non-zero exit" >&2
       exit 1
     fi

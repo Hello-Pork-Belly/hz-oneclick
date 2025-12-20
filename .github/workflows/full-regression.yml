@@ -17,6 +17,7 @@ jobs:
       - name: Full regression suite
         env:
           FULL_REGRESSION_ARTIFACT_DIR: artifacts/full-regression
+          HZ_SMOKE_STRICT: "1"
         run: |
           set -euo pipefail
           timeout 15m bash tests/full_regression.sh

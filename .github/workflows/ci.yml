@@ -63,5 +63,6 @@ jobs:
         if: always()
         env:
           HZ_CI_SMOKE: "1"
+          HZ_SMOKE_STRICT: "0"
         run: |
           timeout 90s bash tests/smoke.sh

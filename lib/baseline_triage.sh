@@ -129,6 +129,19 @@ baseline_triage__smoke_enabled() {
   return 1
 }
 
+baseline_triage__smoke_strict_enabled() {
+  local env_value
+  env_value="${HZ_SMOKE_STRICT:-0}"
+  env_value="${env_value#"${env_value%%[![:space:]]*}"}"
+  env_value="${env_value%"${env_value##*[![:space:]]}"}"
+  case "${env_value,,}" in
+    1|true|yes|y|on)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 baseline_triage__timestamp() {
   date +%Y%m%d-%H%M%S
 }
@@ -847,8 +860,14 @@ baseline_triage_run() {
 
   local exit_status
   exit_status=0
-  if [ "$overall" != "PASS" ]; then
+  if [ "$overall" = "FAIL" ]; then
     exit_status=1
+  elif [ "$overall" = "WARN" ]; then
+    if [ "$smoke_mode" -eq 1 ] && ! baseline_triage__smoke_strict_enabled; then
+      exit_status=0
+    else
+      exit_status=1
+    fi
   fi
 
   baseline_triage__teardown_test_mode
