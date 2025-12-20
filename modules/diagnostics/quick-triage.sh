@@ -133,6 +133,8 @@ parse_args() {
         ;;
       --help)
         echo "Usage: $0 [--format text|json] [--redact] [--smoke|--exit0|--no-fail]"
+        echo "  --smoke/--exit0/--no-fail: force exit 0 for smoke triage only"
+        echo "  HZ_CI_SMOKE=1 (true/yes) enables smoke mode in CI"
         exit 0
         ;;
       *)
@@ -163,7 +165,7 @@ build_triage_args() {
     HZ_TRIAGE_ARGS+=(--format "$HZ_TRIAGE_FORMAT")
   fi
 
-  if [ "$has_smoke" -eq 0 ] && [ "${HZ_CI_SMOKE:-0}" = "1" ]; then
+  if [ "$has_smoke" -eq 0 ] && baseline_triage__smoke_enabled "${HZ_TRIAGE_ARGS[@]}"; then
     HZ_TRIAGE_ARGS+=(--smoke)
     HZ_TRIAGE_SMOKE=1
   fi
@@ -207,7 +209,7 @@ main() {
   domain="$(prompt_domain "$lang")"
   echo
 
-  if [ "$HZ_TRIAGE_SMOKE" = "1" ] || [ "${HZ_CI_SMOKE:-0}" = "1" ]; then
+  if baseline_triage__smoke_enabled "${HZ_TRIAGE_ARGS[@]}"; then
     HZ_CI_SMOKE=1
     export HZ_CI_SMOKE
   fi

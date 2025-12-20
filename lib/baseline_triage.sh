@@ -105,23 +105,24 @@ baseline_triage__normalize_format() {
 }
 
 baseline_triage__smoke_enabled() {
-  local smoke_flag
-  smoke_flag="${1:-}"
+  local arg env_value
+  env_value="${HZ_CI_SMOKE:-0}"
 
-  case "$smoke_flag" in
-    --smoke|--exit0|--no-fail)
+  for arg in "$@"; do
+    case "$arg" in
+      --smoke|--exit0|--no-fail)
+        return 0
+        ;;
+    esac
+  done
+
+  case "${env_value,,}" in
+    1|true|yes)
       return 0
       ;;
   esac
 
-  case "${HZ_CI_SMOKE:-0}" in
-    1|true|TRUE|yes|YES)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  return 1
 }
 
 baseline_triage__timestamp() {
