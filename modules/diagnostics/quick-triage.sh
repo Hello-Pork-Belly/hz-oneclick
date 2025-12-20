@@ -6,9 +6,7 @@ HZ_TRIAGE_TMP="$(mktemp -d /tmp/hz-oneclick-triage-XXXXXX)"
 HZ_TRIAGE_KEEP_TMP="${HZ_TRIAGE_KEEP_TMP:-0}"
 HZ_TRIAGE_USE_LOCAL="${HZ_TRIAGE_USE_LOCAL:-0}"
 HZ_TRIAGE_LOCAL_ROOT="${HZ_TRIAGE_LOCAL_ROOT:-$(pwd)}"
-HZ_TRIAGE_FORMAT="${HZ_TRIAGE_FORMAT:-text}"
 HZ_TRIAGE_REDACT="${HZ_TRIAGE_REDACT:-0}"
-HZ_TRIAGE_SMOKE=0
 HZ_TRIAGE_ARGS=()
 
 if [ "${HZ_TRIAGE_TEST_MODE:-0}" = "1" ] && [ "${BASELINE_TEST_MODE:-0}" != "1" ]; then
@@ -119,27 +117,14 @@ parse_args() {
   while [ "$idx" -lt "${#args[@]}" ]; do
     arg="${args[$idx]}"
     case "$arg" in
-      --format)
-        next="${args[$((idx + 1))]:-}"
-        HZ_TRIAGE_FORMAT="${next:-$HZ_TRIAGE_FORMAT}"
-        idx=$((idx + 2))
-        ;;
-      --format=*)
-        HZ_TRIAGE_FORMAT="${arg#--format=}"
-        idx=$((idx + 1))
-        ;;
       --redact)
         HZ_TRIAGE_REDACT=1
-        idx=$((idx + 1))
-        ;;
-      --smoke|--exit0|--no-fail)
-        HZ_TRIAGE_SMOKE=1
         idx=$((idx + 1))
         ;;
       --help)
         echo "Usage: $0 [--format text|json] [--redact] [--smoke|--exit0|--no-fail]"
         echo "  --smoke/--exit0/--no-fail: force exit 0 for smoke triage only"
-        echo "  HZ_CI_SMOKE=1 (true/yes) enables smoke mode in CI"
+        echo "  HZ_CI_SMOKE=1 (true/yes/y/on) enables smoke mode in CI"
         exit 0
         ;;
       *)
@@ -148,32 +133,6 @@ parse_args() {
         ;;
     esac
   done
-}
-
-build_triage_args() {
-  local has_format has_smoke arg
-  has_format=0
-  has_smoke=0
-
-  for arg in "${HZ_TRIAGE_ARGS[@]}"; do
-    case "$arg" in
-      --format|--format=*|json|text)
-        has_format=1
-        ;;
-      --smoke|--exit0|--no-fail)
-        has_smoke=1
-        ;;
-    esac
-  done
-
-  if [ "$has_format" -eq 0 ] && [ -n "${HZ_TRIAGE_FORMAT:-}" ]; then
-    HZ_TRIAGE_ARGS+=(--format "$HZ_TRIAGE_FORMAT")
-  fi
-
-  if [ "$has_smoke" -eq 0 ] && baseline_triage__smoke_enabled "${HZ_TRIAGE_ARGS[@]}"; then
-    HZ_TRIAGE_ARGS+=(--smoke)
-    HZ_TRIAGE_SMOKE=1
-  fi
 }
 
 run_triage() {
@@ -206,7 +165,6 @@ main() {
   load_libs
 
   parse_args "$@"
-  build_triage_args
 
   local lang domain
   lang="$(prompt_lang)"

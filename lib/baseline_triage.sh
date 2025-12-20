@@ -117,7 +117,7 @@ baseline_triage__smoke_enabled() {
   done
 
   case "${env_value,,}" in
-    1|true|yes|y)
+    1|true|yes|y|on)
       return 0
       ;;
   esac
