@@ -364,7 +364,10 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
 
   echo "[smoke] baseline_triage redacted json run"
   redacted_output_file="$(mktemp)"
-  HZ_CI_SMOKE=1 BASELINE_TEST_MODE=1 BASELINE_REDACT=1 baseline_triage_run "triage.example.com" "en" "json" --smoke > "$redacted_output_file"
+  if ! HZ_CI_SMOKE=1 BASELINE_TEST_MODE=1 BASELINE_REDACT=1 baseline_triage_run "triage.example.com" "en" "json" --smoke > "$redacted_output_file"; then
+    echo "[smoke] smoke triage should exit 0 for redacted JSON run" >&2
+    exit 1
+  fi
   grep -q "^REPORT_JSON:" "$redacted_output_file"
   redacted_json_path="${BASELINE_LAST_REPORT_JSON_PATH:-}"
   if [ -z "$redacted_json_path" ] || [ ! -f "$redacted_json_path" ]; then
