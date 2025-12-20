@@ -64,10 +64,15 @@ jobs:
         env:
           HZ_CI_SMOKE: "1"
           HZ_SMOKE_STRICT: "0"
-        run: timeout 90s bash tests/smoke.sh
+        run: |
+          set +e
+          timeout 90s bash tests/smoke.sh
+          exit_code=$?
+          echo "HZ_SMOKE_EXIT_CODE=$exit_code" >> "$GITHUB_ENV"
+          exit 0
 
       - name: Upload smoke artifacts
-        if: ${{ always() && (failure() || env.HZ_SMOKE_VERDICT == 'WARN' || env.HZ_SMOKE_VERDICT == 'FAIL') }}
+        if: ${{ always() && (env.HZ_SMOKE_VERDICT == 'WARN' || env.HZ_SMOKE_VERDICT == 'FAIL' || env.HZ_SMOKE_EXIT_CODE != '0') }}
         uses: actions/upload-artifact@v4
         with:
           name: smoke-triage-reports
@@ -75,3 +80,31 @@ jobs:
             /tmp/hz-baseline-triage-*.txt
             /tmp/hz-baseline-triage-*.json
           if-no-files-found: ignore
+
+      - name: Enforce smoke verdict
+        if: always()
+        run: |
+          verdict="${HZ_SMOKE_VERDICT:-}"
+          strict="$(printf "%s" "${HZ_SMOKE_STRICT:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+          exit_code="${HZ_SMOKE_EXIT_CODE:-0}"
+
+          is_strict=0
+          case "$strict" in
+            1|true|yes|y|on)
+              is_strict=1
+              ;;
+          esac
+
+          if [ "$verdict" = "FAIL" ]; then
+            exit 1
+          fi
+
+          if [ "$verdict" = "WARN" ] && [ "$is_strict" -eq 1 ]; then
+            exit 1
+          fi
+
+          if [ -z "$verdict" ] && [ "$exit_code" != "0" ]; then
+            exit 1
+          fi
+
+          exit 0
