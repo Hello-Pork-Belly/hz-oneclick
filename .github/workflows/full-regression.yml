@@ -1,0 +1,33 @@
+name: Full Regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  full-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Full regression suite
+        env:
+          FULL_REGRESSION_ARTIFACT_DIR: artifacts/full-regression
+        run: |
+          set -euo pipefail
+          timeout 15m bash tests/full_regression.sh
+
+      - name: Upload regression artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-regression-artifacts
+          path: |
+            artifacts/full-regression/**
+            /tmp/hz-baseline-triage-*.json
+            /tmp/hz-baseline-triage-*.txt
+          if-no-files-found: warn

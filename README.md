@@ -40,6 +40,30 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 - 合并前必须通过 CI 检查。
 - PR 描述需严格按照模板填写，并确保 Summary、Testing 等必填项完整。
 
+## CI 说明
+
+### PR Smoke（快速检查）
+
+- 触发方式：`pull_request` / `push`。
+- 执行内容：`tests/smoke.sh`（强制开启 smoke 模式，带超时，避免挂起）。
+- 本地运行（模拟 CI smoke）：
+
+```bash
+HZ_CI_SMOKE=1 bash tests/smoke.sh
+```
+
+### Full Regression（完整回归）
+
+- 触发方式：手动触发 `Full Regression` 工作流（`workflow_dispatch`），以及每周定时（默认每周一凌晨）。
+- 执行内容：`tests/full_regression.sh`（完整 baseline 回归 + quick triage JSON）。
+- 本地运行：
+
+```bash
+CI=false BASELINE_TEST_MODE=1 HZ_TRIAGE_TEST_MODE=1 bash tests/full_regression.sh
+```
+
+- 失败时会上传 `artifacts/full-regression/` 以及 `/tmp/hz-baseline-triage-*.json|.txt`，用于回归排查。
+
 ## Sensitive docs policy
 
 - 规划文档、架构图、环境与基础设施细节必须保存在私有位置，不得提交到公共仓库。

@@ -8,6 +8,7 @@ on:
 jobs:
   shell-ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -60,5 +61,7 @@ jobs:
 
       - name: Smoke test (safe)
         if: always()
+        env:
+          HZ_CI_SMOKE: "1"
         run: |
-          bash tests/smoke.sh
+          timeout 90s bash tests/smoke.sh
