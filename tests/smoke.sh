@@ -64,21 +64,23 @@ smoke_normalize_verdict() {
 }
 
 smoke_determine_exit() {
-  local verdict strict_effective exit_status unexpected final_exit
+  local verdict strict_effective exit_status final_exit
   verdict="$(smoke_normalize_verdict "${1:-}")"
   strict_effective="${2:-0}"
   exit_status="${3:-0}"
-  unexpected=0
-  final_exit=2
+  final_exit=1
 
   if [ "$exit_status" -ne 0 ] && { [ -z "$verdict" ] || [ "$verdict" = "PASS" ] || [ "$verdict" = "OK" ]; }; then
     verdict="FAIL"
-    unexpected=1
   fi
 
   case "$verdict" in
     PASS|OK|"")
-      final_exit=0
+      if [ "$exit_status" -eq 0 ]; then
+        final_exit=0
+      else
+        final_exit=1
+      fi
       ;;
     WARN)
       if [ "$strict_effective" -eq 1 ]; then
@@ -91,13 +93,9 @@ smoke_determine_exit() {
       final_exit=1
       ;;
     *)
-      final_exit=2
+      final_exit=1
       ;;
   esac
-
-  if [ "$unexpected" -eq 1 ]; then
-    final_exit=2
-  fi
 
   printf '%s\n' "$final_exit"
 }
@@ -228,16 +226,17 @@ export_smoke_env() {
       [ -n "$smoke_verdict" ] && echo "HZ_SMOKE_VERDICT=${smoke_verdict}"
       [ -n "$smoke_report_path" ] && echo "HZ_SMOKE_REPORT_PATH=${smoke_report_path}"
       [ -n "$smoke_report_json_path" ] && echo "HZ_SMOKE_REPORT_JSON_PATH=${smoke_report_json_path}"
+      [ -n "$smoke_report_path" ] && echo "smoke_report_path=${smoke_report_path}"
+      [ -n "$smoke_report_json_path" ] && echo "smoke_report_json_path=${smoke_report_json_path}"
     } >> "$GITHUB_OUTPUT"
   fi
 }
 
 smoke_finalize() {
-  local exit_status final_exit strict_effective unexpected_failure
+  local exit_status final_exit strict_effective
   exit_status="$1"
-  final_exit=2
+  final_exit=1
   strict_effective=0
-  unexpected_failure=0
 
   smoke_verdict="$(smoke_normalize_verdict "$smoke_verdict")"
   if smoke_strict_enabled; then
@@ -246,13 +245,9 @@ smoke_finalize() {
 
   if [ "$exit_status" -ne 0 ] && { [ -z "$smoke_verdict" ] || [ "$smoke_verdict" = "PASS" ] || [ "$smoke_verdict" = "OK" ]; }; then
     smoke_verdict="FAIL"
-    unexpected_failure=1
   fi
 
   final_exit="$(smoke_determine_exit "$smoke_verdict" "$strict_effective" "$exit_status")"
-  if [ "$unexpected_failure" -eq 1 ]; then
-    final_exit=2
-  fi
 
   export_smoke_env "$strict_effective"
   emit_smoke_annotation

@@ -33,6 +33,8 @@ jobs:
         with:
           name: smoke-triage-reports
           path: |
+            ${{ steps.smoke.outputs.smoke_report_path }}
+            ${{ steps.smoke.outputs.smoke_report_json_path }}
             /tmp/hz-baseline-triage-*.txt
             /tmp/hz-baseline-triage-*.json
           if-no-files-found: ignore
@@ -43,8 +45,10 @@ jobs:
           HZ_SMOKE_STRICT: "1"
         run: |
           set -euo pipefail
-          verdict="${{ steps.smoke.outputs.HZ_SMOKE_VERDICT }}"
+          verdict_raw="${{ steps.smoke.outputs.HZ_SMOKE_VERDICT }}"
           exit_code="${{ steps.smoke.outputs.exit_code }}"
+          report_path="${{ steps.smoke.outputs.smoke_report_path }}"
+          report_json_path="${{ steps.smoke.outputs.smoke_report_json_path }}"
           strict_raw="${HZ_SMOKE_STRICT:-0}"
 
           normalize_verdict() {
@@ -76,21 +80,38 @@ jobs:
             strict_enabled="true"
           fi
 
-          verdict="$(normalize_verdict "$verdict")"
-          exit_code="${exit_code:-0}"
+          verdict="$(normalize_verdict "$verdict_raw")"
+          exit_code="${exit_code:-1}"
+          if [ "$exit_code" -ne 0 ]; then
+            verdict="FAIL"
+          fi
+          if [ -z "$verdict" ]; then
+            verdict="FAIL"
+          fi
+
+          {
+            echo "### Smoke verdict"
+            echo ""
+            echo "- verdict: ${verdict}"
+            echo "- strict: ${strict_enabled}"
+            echo "- exit_code: ${exit_code}"
+            [ -n "$report_path" ] && echo "- report_path: ${report_path}"
+            [ -n "$report_json_path" ] && echo "- report_json_path: ${report_json_path}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           echo "[smoke-enforce] verdict=${verdict} exit_code=${exit_code} strict=${strict_enabled}"
+          if [ "$exit_code" -ne 0 ]; then
+            exit 1
+          fi
           case "$verdict" in
             PASS|OK)
-              if [ "$exit_code" -ne 0 ]; then
-                exit 1
-              fi
               ;;
             WARN)
               if [ "$strict_enabled" = "true" ]; then
                 exit 1
               fi
               ;;
-            FAIL|"")
+            FAIL)
               exit 1
               ;;
             *)
