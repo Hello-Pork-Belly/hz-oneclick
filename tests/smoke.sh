@@ -11,11 +11,29 @@ forbidden_terms_b64=(
 )
 forbidden_terms=()
 SCHEMA_PATH="./docs/schema/baseline_diagnostics.schema.json"
+timeout_available=0
 for term_b64 in "${forbidden_terms_b64[@]}"; do
   if decoded_term=$(printf '%s' "$term_b64" | base64 -d 2>/dev/null); then
     forbidden_terms+=("$decoded_term")
   fi
 done
+if command -v timeout >/dev/null 2>&1; then
+  timeout_available=1
+fi
+
+run_with_timeout() {
+  local duration="30s"
+  if [ $# -gt 0 ] && [[ "$1" =~ ^[0-9]+[smhd]?$ ]]; then
+    duration="$1"
+    shift
+  fi
+
+  if [ "$timeout_available" -eq 1 ]; then
+    timeout "$duration" "$@"
+  else
+    "$@"
+  fi
+}
 
 validate_json_file() {
   local json_path expected_group
@@ -417,7 +435,7 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
 
   echo "[smoke] quick triage standalone runner (redact mode)"
   before_latest_json="$(find_latest_triage_json)"
-  triage_output_json_redacted="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 bash ./modules/diagnostics/quick-triage.sh --format json --redact --smoke)"
+  triage_output_json_redacted="$(HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 HZ_CI_SMOKE=1 bash ./modules/diagnostics/quick-triage.sh --format json --redact --smoke)"
   echo "$triage_output_json_redacted" | grep -qi "<redacted"
   latest_json="$(find_latest_triage_json)"
   if [ -z "$latest_json" ] || { [ -n "$before_latest_json" ] && [ "$latest_json" = "$before_latest_json" ]; }; then
@@ -432,6 +450,6 @@ else
 fi
 
 echo "[smoke] baseline regression suite"
-bash tests/baseline_smoke.sh
+run_with_timeout 60s bash tests/baseline_smoke.sh
 
 echo "[smoke] OK"

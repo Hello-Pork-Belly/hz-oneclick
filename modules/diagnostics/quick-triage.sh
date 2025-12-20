@@ -113,23 +113,28 @@ sanitize_output() {
 
 parse_args() {
   HZ_TRIAGE_ARGS=("$@")
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
+  local -a args=("$@")
+  local idx arg next
+  idx=0
+  while [ "$idx" -lt "${#args[@]}" ]; do
+    arg="${args[$idx]}"
+    case "$arg" in
       --format)
-        HZ_TRIAGE_FORMAT="${2:-$HZ_TRIAGE_FORMAT}"
-        shift 2
+        next="${args[$((idx + 1))]:-}"
+        HZ_TRIAGE_FORMAT="${next:-$HZ_TRIAGE_FORMAT}"
+        idx=$((idx + 2))
         ;;
       --format=*)
-        HZ_TRIAGE_FORMAT="${1#--format=}"
-        shift
+        HZ_TRIAGE_FORMAT="${arg#--format=}"
+        idx=$((idx + 1))
         ;;
       --redact)
         HZ_TRIAGE_REDACT=1
-        shift
+        idx=$((idx + 1))
         ;;
       --smoke|--exit0|--no-fail)
         HZ_TRIAGE_SMOKE=1
-        shift
+        idx=$((idx + 1))
         ;;
       --help)
         echo "Usage: $0 [--format text|json] [--redact] [--smoke|--exit0|--no-fail]"
@@ -139,7 +144,7 @@ parse_args() {
         ;;
       *)
         # Ignore unknown args for forward compatibility
-        shift
+        idx=$((idx + 1))
         ;;
     esac
   done
