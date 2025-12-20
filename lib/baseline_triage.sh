@@ -118,20 +118,16 @@ baseline_triage__smoke_enabled() {
     esac
   done
 
-  env_value="${env_value#"${env_value%%[![:space:]]*}"}"
-  env_value="${env_value%"${env_value##*[![:space:]]}"}"
-  case "${env_value,,}" in
-    1|true|yes|y|on)
-      return 0
-      ;;
-  esac
+  if baseline_triage__is_truthy "$env_value"; then
+    return 0
+  fi
 
   return 1
 }
 
-baseline_triage__smoke_strict_enabled() {
+baseline_triage__is_truthy() {
   local env_value
-  env_value="${HZ_SMOKE_STRICT:-0}"
+  env_value="${1:-}"
   env_value="${env_value#"${env_value%%[![:space:]]*}"}"
   env_value="${env_value%"${env_value##*[![:space:]]}"}"
   case "${env_value,,}" in
@@ -140,6 +136,10 @@ baseline_triage__smoke_strict_enabled() {
       ;;
   esac
   return 1
+}
+
+baseline_triage__smoke_strict_enabled() {
+  baseline_triage__is_truthy "${HZ_SMOKE_STRICT:-0}"
 }
 
 baseline_triage__timestamp() {

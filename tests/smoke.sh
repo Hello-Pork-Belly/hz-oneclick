@@ -35,6 +35,19 @@ run_with_timeout() {
   fi
 }
 
+is_truthy_env() {
+  local env_value
+  env_value="${1:-}"
+  env_value="${env_value#"${env_value%%[![:space:]]*}"}"
+  env_value="${env_value%"${env_value##*[![:space:]]}"}"
+  case "${env_value,,}" in
+    1|true|yes|y|on)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 validate_json_file() {
   local json_path expected_group
   json_path="$1"
@@ -355,6 +368,15 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
 
   echo "[smoke] smoke verdict strictness policy"
   (
+    expected_warn_non_strict=0
+    expected_warn_strict=0
+    if is_truthy_env "0"; then
+      expected_warn_non_strict=1
+    fi
+    if is_truthy_env "1"; then
+      expected_warn_strict=1
+    fi
+
     baseline_triage__run_groups() {
       baseline_add_result "TEST" "test_warn" "WARN" "TEST_WARN" "warn detected" "review warning"
       return 0
@@ -376,11 +398,11 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
     fail_exit_strict=$?
     set -e
 
-    if [ "$warn_exit_non_strict" -ne 0 ]; then
+    if [ "$warn_exit_non_strict" -ne "$expected_warn_non_strict" ]; then
       echo "[smoke] WARN should exit 0 when HZ_SMOKE_STRICT=0" >&2
       exit 1
     fi
-    if [ "$warn_exit_strict" -eq 0 ]; then
+    if [ "$warn_exit_strict" -ne "$expected_warn_strict" ]; then
       echo "[smoke] WARN should exit 1 when HZ_SMOKE_STRICT=1" >&2
       exit 1
     fi
