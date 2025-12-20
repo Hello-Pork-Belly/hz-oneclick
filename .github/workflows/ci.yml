@@ -64,6 +64,76 @@ jobs:
           set -euo pipefail
           HZ_SMOKE_SELFTEST=1 bash tests/smoke.sh
 
+      - name: Smoke gating self-check
+        run: |
+          set -euo pipefail
+
+          normalize_verdict() {
+            local value token
+            value="${1:-}"
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            value="${value^^}"
+            token="$(printf '%s' "$value" | grep -Eo '(PASS|OK|WARN|FAIL)' | head -n1 || true)"
+            if [ -n "$token" ]; then
+              printf '%s' "$token"
+            else
+              printf 'FAIL'
+            fi
+          }
+
+          enforce_verdict() {
+            local verdict_raw strict exit_code verdict
+            verdict_raw="$1"
+            strict="$2"
+            exit_code="$3"
+            verdict="$(normalize_verdict "$verdict_raw")"
+
+            if { [ "$verdict" = "PASS" ] || [ "$verdict" = "OK" ]; } && [ "$exit_code" -ne 0 ]; then
+              verdict="FAIL"
+            fi
+
+            case "$verdict" in
+              PASS|OK)
+                return 0
+                ;;
+              WARN)
+                if [ "$strict" -eq 1 ]; then
+                  return 1
+                fi
+                return 0
+                ;;
+              FAIL|*)
+                return 1
+                ;;
+            esac
+          }
+
+          require_result() {
+            local label strict verdict exit_code expected
+            label="$1"
+            strict="$2"
+            verdict="$3"
+            exit_code="$4"
+            expected="$5"
+            if enforce_verdict "$verdict" "$strict" "$exit_code"; then
+              actual=0
+            else
+              actual=1
+            fi
+            if [ "$actual" -ne "$expected" ]; then
+              echo "[smoke-gating] ${label} strict=${strict} verdict=${verdict} exit_code=${exit_code} expected=${expected} got=${actual}" >&2
+              exit 1
+            fi
+          }
+
+          require_result "case-a-nonstrict" 0 "PASS" 0 0
+          require_result "case-a-strict" 1 "PASS" 0 0
+          require_result "case-b-nonstrict" 0 "WARN" 1 0
+          require_result "case-b-strict" 1 "WARN" 1 1
+          require_result "case-c-nonstrict" 0 "FAIL" 1 1
+          require_result "case-c-strict" 1 "FAIL" 1 1
+
       - name: Smoke test (safe)
         if: always()
         id: smoke
@@ -75,7 +145,22 @@ jobs:
           set +e
           timeout 90s bash tests/smoke.sh
           code=$?
+          code="${code:-1}"
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then
+            output_file="$GITHUB_OUTPUT"
+            ensure_output() {
+              local key value
+              key="$1"
+              value="$2"
+              if ! grep -q "^${key}=" "$output_file"; then
+                echo "${key}=${value}" >> "$output_file"
+              fi
+            }
+            ensure_output "HZ_SMOKE_VERDICT" "FAIL"
+            ensure_output "smoke_report_path" "unknown"
+            ensure_output "smoke_report_json_path" "unknown"
+          fi
           set -e
           exit 0
 
