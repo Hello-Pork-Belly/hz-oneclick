@@ -52,9 +52,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 HZ_CI_SMOKE=1 bash tests/smoke.sh
 ```
 
-- 可选环境变量：`HZ_SMOKE_STRICT=1` 将 WARN 视为失败（默认 0，WARN 仍返回 0）。
+- 可选环境变量：`HZ_SMOKE_STRICT=1` 将 WARN 视为失败（默认 0）。
+- `tests/smoke.sh` 的退出码语义：
+  - `VERDICT=PASS` ➜ exit 0
+  - `VERDICT=WARN` ➜ `HZ_SMOKE_STRICT=0` 时 exit 0，`HZ_SMOKE_STRICT=1` 时 exit 1
+  - `VERDICT=FAIL` ➜ exit 1
+  - verdict 缺失/未知或出现内部错误 ➜ exit 2
 - PR smoke 出现 WARN 会在 GitHub Actions 中生成 warning annotation（默认不失败）。
-- PR smoke 失败时会在 Actions 的 Artifacts 中上传 `smoke-triage-reports`，包含 `/tmp/hz-baseline-triage-*.txt` 和 `/tmp/hz-baseline-triage-*.json`（WARN 时也会上传）。
+- PR smoke 在 WARN/FAIL 或步骤失败时会在 Actions 的 Artifacts 中上传 `smoke-triage-reports`，包含 `/tmp/hz-baseline-triage-*.txt` 和 `/tmp/hz-baseline-triage-*.json`。
 
 ### Full Regression（完整回归）
 
@@ -66,7 +71,8 @@ HZ_CI_SMOKE=1 bash tests/smoke.sh
 CI=false BASELINE_TEST_MODE=1 HZ_TRIAGE_TEST_MODE=1 bash tests/full_regression.sh
 ```
 
-- 失败时会上传 `artifacts/full-regression/` 以及 `/tmp/hz-baseline-triage-*.json|.txt`，用于回归排查。
+- 全量回归默认 `HZ_SMOKE_STRICT=1`，WARN 会直接失败并触发上传。
+- 失败、WARN 或步骤失败时会上传 `artifacts/full-regression/` 以及 `/tmp/hz-baseline-triage-*.json|.txt`，用于回归排查。
 
 ## Sensitive docs policy
 

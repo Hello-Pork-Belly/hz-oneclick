@@ -18,15 +18,10 @@ jobs:
         env:
           FULL_REGRESSION_ARTIFACT_DIR: artifacts/full-regression
           HZ_SMOKE_STRICT: "1"
-        run: |
-          set +e
-          timeout 15m bash tests/full_regression.sh
-          exit_code=$?
-          echo "HZ_SMOKE_EXIT_CODE=$exit_code" >> "$GITHUB_ENV"
-          exit 0
+        run: timeout 15m bash tests/full_regression.sh
 
       - name: Upload regression artifacts
-        if: ${{ always() && (env.HZ_SMOKE_VERDICT == 'WARN' || env.HZ_SMOKE_VERDICT == 'FAIL' || env.HZ_SMOKE_EXIT_CODE != '0') }}
+        if: ${{ always() && (failure() || env.HZ_SMOKE_VERDICT == 'WARN' || env.HZ_SMOKE_VERDICT == 'FAIL') }}
         uses: actions/upload-artifact@v4
         with:
           name: full-regression-artifacts
@@ -35,23 +30,3 @@ jobs:
             /tmp/hz-baseline-triage-*.json
             /tmp/hz-baseline-triage-*.txt
           if-no-files-found: warn
-
-      - name: Enforce smoke verdict
-        if: always()
-        env:
-          HZ_SMOKE_STRICT: "1"
-        run: |
-          if [[ "${HZ_SMOKE_VERDICT:-}" == "FAIL" ]]; then
-            exit 1
-          fi
-
-          if [[ "${HZ_SMOKE_VERDICT:-}" == "WARN" ]]; then
-            if [[ "${HZ_SMOKE_STRICT:-}" != "0" ]]; then
-              exit 1
-            fi
-            exit 0
-          fi
-
-          if [[ "${HZ_SMOKE_EXIT_CODE:-0}" != "0" ]]; then
-            exit 1
-          fi
