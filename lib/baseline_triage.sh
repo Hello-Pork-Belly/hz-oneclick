@@ -871,8 +871,5 @@ baseline_triage_run() {
   fi
 
   baseline_triage__teardown_test_mode
-  if [ "$smoke_mode" -eq 1 ]; then
-    return 0
-  fi
   return "$exit_status"
 }

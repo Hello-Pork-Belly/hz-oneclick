@@ -353,6 +353,43 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
     fi
   )
 
+  echo "[smoke] smoke verdict strictness policy"
+  (
+    baseline_triage__run_groups() {
+      baseline_add_result "TEST" "test_warn" "WARN" "TEST_WARN" "warn detected" "review warning"
+      return 0
+    }
+
+    set +e
+    HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
+    warn_exit_non_strict=$?
+    HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
+    warn_exit_strict=$?
+
+    baseline_triage__run_groups() {
+      baseline_add_result "TEST" "test_fail" "FAIL" "TEST_FAIL" "fail detected" "fix failure"
+      return 0
+    }
+    HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
+    fail_exit_non_strict=$?
+    HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
+    fail_exit_strict=$?
+    set -e
+
+    if [ "$warn_exit_non_strict" -ne 0 ]; then
+      echo "[smoke] WARN should exit 0 when HZ_SMOKE_STRICT=0" >&2
+      exit 1
+    fi
+    if [ "$warn_exit_strict" -eq 0 ]; then
+      echo "[smoke] WARN should exit 1 when HZ_SMOKE_STRICT=1" >&2
+      exit 1
+    fi
+    if [ "$fail_exit_non_strict" -eq 0 ] || [ "$fail_exit_strict" -eq 0 ]; then
+      echo "[smoke] FAIL should exit 1 in all modes" >&2
+      exit 1
+    fi
+  )
+
   echo "[smoke] baseline_triage report output"
   triage_output="$( ( HZ_CI_SMOKE=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke ) )"
   echo "$triage_output" | grep -q "^VERDICT:"

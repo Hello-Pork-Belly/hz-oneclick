@@ -52,6 +52,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 HZ_CI_SMOKE=1 bash tests/smoke.sh
 ```
 
+- 可选环境变量：`HZ_SMOKE_STRICT=1` 将 WARN 视为失败（默认 0，WARN 仍返回 0）。
+
 ### Full Regression（完整回归）
 
 - 触发方式：手动触发 `Full Regression` 工作流（`workflow_dispatch`），以及每周定时（默认每周一凌晨）。
