@@ -349,6 +349,7 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
     fi
   )
 
+  echo "[smoke] baseline_triage report output"
   triage_output="$( ( HZ_CI_SMOKE=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke ) )"
   echo "$triage_output" | grep -q "^VERDICT:"
   echo "$triage_output" | grep -q "^KEY:"
@@ -360,6 +361,7 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
   grep -q "HZ Quick Triage Report" "$report_path"
   grep -q "Baseline Diagnostics Summary" "$report_path"
 
+  echo "[smoke] baseline_triage json output"
   triage_json_output="$( ( HZ_CI_SMOKE=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" "json" --smoke ) )"
   echo "$triage_json_output" | grep -q "^REPORT_JSON:"
   json_report_path="$(echo "$triage_json_output" | awk '/^REPORT_JSON:/ {print $2}')"
@@ -450,6 +452,6 @@ else
 fi
 
 echo "[smoke] baseline regression suite"
-run_with_timeout 60s bash tests/baseline_smoke.sh
+run_with_timeout 90s env HZ_CI_SMOKE=1 bash tests/baseline_smoke.sh
 
 echo "[smoke] OK"

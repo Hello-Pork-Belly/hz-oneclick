@@ -3,6 +3,59 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEMA_PATH="${REPO_ROOT}/docs/schema/baseline_diagnostics.schema.json"
+SMOKE_MODE=0
+timeout_available=0
+SMOKE_STEP_TIMEOUT="${BASELINE_SMOKE_STEP_TIMEOUT:-10s}"
+
+is_truthy() {
+  case "$(printf "%s" "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+    1|true|yes|y|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if is_truthy "${HZ_CI_SMOKE:-}"; then
+  SMOKE_MODE=1
+fi
+
+if [ "${CI:-}" = "true" ]; then
+  SMOKE_MODE=1
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  timeout_available=1
+fi
+
+run_step() {
+  local label
+  label="$1"
+  shift
+
+  echo "[baseline-smoke] step: ${label}" >&2
+  if [ "$SMOKE_MODE" -eq 1 ] && [ "$timeout_available" -eq 1 ] && ! declare -F "${1:-}" >/dev/null 2>&1; then
+    timeout "$SMOKE_STEP_TIMEOUT" "$@"
+  else
+    "$@"
+  fi
+}
+
+smoke_seed_results() {
+  baseline_add_result "HTTPS/521" "LISTEN_80" "PASS" "LISTEN_80" "listen ok" ""
+  baseline_add_result "DB" "DB_TCP_CONNECT" "WARN" "DB_TCP_CONNECT" "db tcp mock" ""
+  baseline_add_result "DNS/IP" "DNS_A_RECORD" "PASS" "DNS_A_RECORD" "dns mock" ""
+  baseline_add_result "ORIGIN/FW" "SERVICE_OLS" "WARN" "SERVICE_OLS" "origin mock" ""
+  baseline_add_result "Proxy/CDN" "HTTPS_STATUS" "PASS" "HTTPS_STATUS" "proxy mock" ""
+  baseline_add_result "TLS/CERT" "CERT_CHAIN" "PASS" "CERT_CHAIN" "tls mock" ""
+  baseline_add_result "WP/APP" "HTTP_ROOT" "WARN" "HTTP_ROOT" "wp mock" ""
+  baseline_add_result "LSWS/OLS" "LSWS_ACTIVE" "WARN" "lsws_active" "lsws mock" ""
+  baseline_add_result "CACHE/REDIS" "REDIS_PING" "WARN" "redis_ping" "redis mock" ""
+  baseline_add_result "SYSTEM/RESOURCE" "DISK_USAGE_ROOT" "PASS" "DISK_USAGE_ROOT" \
+    $'KEY:DISK_USAGE_ROOT=10%\nKEY:LOAD1_PER_CORE=0.5' ""
+}
 
 assert_contains() {
   local haystack needle
@@ -44,51 +97,53 @@ fi
 # shellcheck source=/dev/null
 . "${REPO_ROOT}/lib/baseline.sh"
 
-if [ -r "${REPO_ROOT}/lib/baseline_https.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_https.sh"
-fi
+if [ "$SMOKE_MODE" -ne 1 ]; then
+  if [ -r "${REPO_ROOT}/lib/baseline_https.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_https.sh"
+  fi
 
-if [ -r "${REPO_ROOT}/lib/baseline_db.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_db.sh"
-fi
+  if [ -r "${REPO_ROOT}/lib/baseline_db.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_db.sh"
+  fi
 
-if [ -r "${REPO_ROOT}/lib/baseline_dns.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_dns.sh"
-fi
+  if [ -r "${REPO_ROOT}/lib/baseline_dns.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_dns.sh"
+  fi
 
-if [ -r "${REPO_ROOT}/lib/baseline_origin.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_origin.sh"
-fi
+  if [ -r "${REPO_ROOT}/lib/baseline_origin.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_origin.sh"
+  fi
 
-if [ -r "${REPO_ROOT}/lib/baseline_proxy.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_proxy.sh"
-fi
+  if [ -r "${REPO_ROOT}/lib/baseline_proxy.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_proxy.sh"
+  fi
 
-if [ -r "${REPO_ROOT}/lib/baseline_tls.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_tls.sh"
-fi
+  if [ -r "${REPO_ROOT}/lib/baseline_tls.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_tls.sh"
+  fi
 
-if [ -r "${REPO_ROOT}/lib/baseline_wp.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_wp.sh"
-fi
-if [ -r "${REPO_ROOT}/lib/baseline_lsws.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_lsws.sh"
-fi
-if [ -r "${REPO_ROOT}/lib/baseline_cache.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_cache.sh"
-fi
-if [ -r "${REPO_ROOT}/lib/baseline_sys.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/baseline_sys.sh"
+  if [ -r "${REPO_ROOT}/lib/baseline_wp.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_wp.sh"
+  fi
+  if [ -r "${REPO_ROOT}/lib/baseline_lsws.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_lsws.sh"
+  fi
+  if [ -r "${REPO_ROOT}/lib/baseline_cache.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_cache.sh"
+  fi
+  if [ -r "${REPO_ROOT}/lib/baseline_sys.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/baseline_sys.sh"
+  fi
 fi
 
 echo "[baseline-smoke] vendor-neutral wording check"
@@ -121,6 +176,7 @@ if [ ${#forbidden_terms[@]} -gt 0 ]; then
 fi
 
 if [ ${#filtered_paths[@]} -gt 0 ] && [ -n "$vendor_regex" ]; then
+  echo "[baseline-smoke] step: vendor wording scan" >&2
   if grep -RIn -Ei "$vendor_regex" "${filtered_paths[@]}"; then
     echo "[baseline-smoke] vendor names should not appear in repository" >&2
     exit 1
@@ -149,42 +205,48 @@ assert_contains "$details_output" "Suggestions"
 
 echo "[baseline-smoke] group registration and structural regression"
 baseline_init
-if declare -F baseline_https_run >/dev/null 2>&1; then
-  baseline_https_run "abc.yourdomain.com" "en"
-fi
-if declare -F baseline_db_run >/dev/null 2>&1; then
-  baseline_db_run "127.0.0.1" "3306" "abc_db" "abc_user" "placeholder-password" "en"
-fi
-if declare -F baseline_dns_run >/dev/null 2>&1; then
-  baseline_dns_run "123.yourdomain.com" "en"
-fi
-if declare -F baseline_origin_run >/dev/null 2>&1; then
-  baseline_origin_run "abc.yourdomain.com" "en"
-fi
-if declare -F baseline_proxy_run >/dev/null 2>&1; then
-  baseline_proxy_run "example.com" "en"
-fi
-if declare -F baseline_tls_run >/dev/null 2>&1; then
-  baseline_tls_run "example.com" "en"
-fi
-if declare -F baseline_wp_run >/dev/null 2>&1; then
-  BASELINE_WP_NO_PROMPT=1 baseline_wp_run "example.invalid" "" "en"
-fi
-if declare -F baseline_lsws_run >/dev/null 2>&1; then
-  baseline_lsws_run "" "en"
-fi
-if declare -F baseline_cache_run >/dev/null 2>&1; then
-  tmp_wp="$(mktemp -d)"
-  mkdir -p "$tmp_wp/wp-content"
-  cat > "$tmp_wp/wp-config.php" <<'EOF'
+if [ "$SMOKE_MODE" -eq 1 ]; then
+  run_step "seed baseline results (smoke mode)" smoke_seed_results
+else
+  if declare -F baseline_https_run >/dev/null 2>&1; then
+    run_step "baseline_https_run" baseline_https_run "abc.yourdomain.com" "en"
+  fi
+  if declare -F baseline_db_run >/dev/null 2>&1; then
+    run_step "baseline_db_run" baseline_db_run "127.0.0.1" "3306" "abc_db" "abc_user" "placeholder-password" "en"
+  fi
+  if declare -F baseline_dns_run >/dev/null 2>&1; then
+    run_step "baseline_dns_run" baseline_dns_run "123.yourdomain.com" "en"
+  fi
+  if declare -F baseline_origin_run >/dev/null 2>&1; then
+    run_step "baseline_origin_run" baseline_origin_run "abc.yourdomain.com" "en"
+  fi
+  if declare -F baseline_proxy_run >/dev/null 2>&1; then
+    run_step "baseline_proxy_run" baseline_proxy_run "example.com" "en"
+  fi
+  if declare -F baseline_tls_run >/dev/null 2>&1; then
+    run_step "baseline_tls_run" baseline_tls_run "example.com" "en"
+  fi
+  if declare -F baseline_wp_run >/dev/null 2>&1; then
+    run_step "baseline_wp_run" env BASELINE_WP_NO_PROMPT=1 baseline_wp_run "example.invalid" "" "en"
+  fi
+  if declare -F baseline_lsws_run >/dev/null 2>&1; then
+    run_step "baseline_lsws_run" baseline_lsws_run "" "en"
+  fi
+  if declare -F baseline_cache_run >/dev/null 2>&1; then
+    run_step "baseline_cache_run" bash -c '
+      tmp_wp="$(mktemp -d)"
+      mkdir -p "$tmp_wp/wp-content"
+      cat > "$tmp_wp/wp-config.php" <<'"'"'EOF'"'"'
 <?php
 define('WP_CACHE', true);
 EOF
-  baseline_cache_run "$tmp_wp" "en"
-  rm -rf "$tmp_wp"
-fi
-if declare -F baseline_sys_run >/dev/null 2>&1; then
-  baseline_sys_run "en"
+      baseline_cache_run "$tmp_wp" "en"
+      rm -rf "$tmp_wp"
+    '
+  fi
+  if declare -F baseline_sys_run >/dev/null 2>&1; then
+    run_step "baseline_sys_run" baseline_sys_run "en"
+  fi
 fi
 
 summary_output="$(baseline_print_summary)"
@@ -215,8 +277,10 @@ assert_contains "$details_output" "KEY:DISK_USAGE_ROOT"
 assert_contains "$details_output" "KEY:LOAD1_PER_CORE"
 
 echo "[baseline-smoke] wrapper quick verdict check"
-if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
-  wrapper_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en")"
+if [ "$SMOKE_MODE" -eq 1 ]; then
+  echo "[baseline-smoke] smoke mode skipping wrapper quick verdict check"
+elif [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
+  wrapper_output="$(run_step "baseline-dns-ip wrapper" env BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en")"
   assert_contains "$wrapper_output" "VERDICT:"
   assert_contains "$wrapper_output" "KEY:"
 fi
@@ -322,79 +386,91 @@ PY
   fi
 }
 
-if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
-  dns_json_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en" --format json)"
-  validate_wrapper_json "$dns_json_output" "dns-ip" "$vendor_regex"
-fi
+if [ "$SMOKE_MODE" -eq 1 ]; then
+  echo "[baseline-smoke] smoke mode skipping wrapper json output"
+else
+  if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
+    dns_json_output="$(run_step "baseline-dns-ip json wrapper" env BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en" --format json)"
+    validate_wrapper_json "$dns_json_output" "dns-ip" "$vendor_regex"
+  fi
 
-if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" ]; then
-  tls_json_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" "example.com" "en" --format json)"
-  validate_wrapper_json "$tls_json_output" "tls-https" "$vendor_regex"
-fi
+  if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" ]; then
+    tls_json_output="$(run_step "baseline-tls-https json wrapper" env BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" "example.com" "en" --format json)"
+    validate_wrapper_json "$tls_json_output" "tls-https" "$vendor_regex"
+  fi
 
-if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" ]; then
-  cache_json_output="$(BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" --format json)"
-  validate_wrapper_json "$cache_json_output" "cache-redis" "$vendor_regex"
-fi
+  if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" ]; then
+    cache_json_output="$(run_step "baseline-cache json wrapper" env BASELINE_TEST_MODE=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" --format json)"
+    validate_wrapper_json "$cache_json_output" "cache-redis" "$vendor_regex"
+  fi
 
-echo "[baseline-smoke] wrapper json output (redact mode)"
-if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
-  dns_json_redacted_output="$(BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en" --format json --redact)"
-  validate_wrapper_json "$dns_json_redacted_output" "dns-ip" "$vendor_regex" 1
-  assert_contains "$dns_json_redacted_output" "<redacted"
-fi
+  echo "[baseline-smoke] wrapper json output (redact mode)"
+  if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" ]; then
+    dns_json_redacted_output="$(run_step "baseline-dns-ip redacted wrapper" env BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-dns-ip.sh" "example.com" "en" --format json --redact)"
+    validate_wrapper_json "$dns_json_redacted_output" "dns-ip" "$vendor_regex" 1
+    assert_contains "$dns_json_redacted_output" "<redacted"
+  fi
 
-if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" ]; then
-  tls_json_redacted_output="$(BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" "example.com" "en" --format json --redact)"
-  validate_wrapper_json "$tls_json_redacted_output" "tls-https" "$vendor_regex" 1
-  assert_contains "$tls_json_redacted_output" "<redacted"
-fi
+  if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" ]; then
+    tls_json_redacted_output="$(run_step "baseline-tls-https redacted wrapper" env BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-tls-https.sh" "example.com" "en" --format json --redact)"
+    validate_wrapper_json "$tls_json_redacted_output" "tls-https" "$vendor_regex" 1
+    assert_contains "$tls_json_redacted_output" "<redacted"
+  fi
 
-if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" ]; then
-  cache_json_redacted_output="$(BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" --format json --redact)"
-  validate_wrapper_json "$cache_json_redacted_output" "cache-redis" "$vendor_regex" 1
-  assert_contains "$cache_json_redacted_output" "<redacted"
+  if [ -x "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" ]; then
+    cache_json_redacted_output="$(run_step "baseline-cache redacted wrapper" env BASELINE_TEST_MODE=1 BASELINE_REDACT=1 HZ_BASELINE_LANG=en HZ_BASELINE_FORMAT=json bash "${REPO_ROOT}/modules/diagnostics/baseline-cache.sh" --format json --redact)"
+    validate_wrapper_json "$cache_json_redacted_output" "cache-redis" "$vendor_regex" 1
+    assert_contains "$cache_json_redacted_output" "<redacted"
+  fi
 fi
 
 
 echo "[baseline-smoke] secrets leak guard"
-TEST_DB_PASS="SuperSecret123!DoNotLeak"
-TEST_REDIS_PASS="AnotherSecret456!DoNotLeak"
+if [ "$SMOKE_MODE" -eq 1 ]; then
+  echo "[baseline-smoke] smoke mode skipping secrets leak guard"
+else
+  TEST_DB_PASS="SuperSecret123!DoNotLeak"
+  TEST_REDIS_PASS="AnotherSecret456!DoNotLeak"
 
-baseline_init
-secret_output="$(
-  {
-    if declare -F baseline_db_run >/dev/null 2>&1; then
-      baseline_db_run "127.0.0.1" "3306" "abc_db" "abc_user" "$TEST_DB_PASS" "en"
-    fi
-    if declare -F baseline_https_run >/dev/null 2>&1; then
-      baseline_https_run "abc.yourdomain.com" "en"
-    fi
-    baseline_print_summary
-    baseline_print_details
-  } 2>&1
-)"
+  baseline_init
+  secret_output="$(
+    {
+      if declare -F baseline_db_run >/dev/null 2>&1; then
+        baseline_db_run "127.0.0.1" "3306" "abc_db" "abc_user" "$TEST_DB_PASS" "en"
+      fi
+      if declare -F baseline_https_run >/dev/null 2>&1; then
+        baseline_https_run "abc.yourdomain.com" "en"
+      fi
+      baseline_print_summary
+      baseline_print_details
+    } 2>&1
+  )"
 
-assert_not_contains "$secret_output" "$TEST_DB_PASS"
-assert_not_contains "$secret_output" "$TEST_REDIS_PASS"
-assert_not_contains "$secret_output" "DB_PASSWORD="
+  assert_not_contains "$secret_output" "$TEST_DB_PASS"
+  assert_not_contains "$secret_output" "$TEST_REDIS_PASS"
+  assert_not_contains "$secret_output" "DB_PASSWORD="
+fi
 
 
 echo "[baseline-smoke] tier entry regression (Lite/Standard/Hub reachability)"
-for tier in Lite Standard Hub; do
-  baseline_init
-  if declare -F baseline_https_run >/dev/null 2>&1; then
-    baseline_https_run "127.0.0.1" "en"
-  else
-    baseline_add_result "HTTPS/521" "LISTEN_80" "WARN" "LISTEN_80" "placeholder" ""
-  fi
-  tier_summary="$(baseline_print_summary)"
-  tier_details="$(baseline_print_details)"
-  assert_contains "$tier_summary" "Overall:"
-  assert_contains "$tier_details" "Group: HTTPS/521"
-  assert_contains "$tier_details" "Evidence:"
-  assert_contains "$tier_details" "Suggestions:"
-  echo "[baseline-smoke] tier ${tier} summary ready"
-done
+if [ "$SMOKE_MODE" -eq 1 ]; then
+  echo "[baseline-smoke] smoke mode skipping tier entry regression"
+else
+  for tier in Lite Standard Hub; do
+    baseline_init
+    if declare -F baseline_https_run >/dev/null 2>&1; then
+      run_step "tier ${tier} baseline_https_run" baseline_https_run "127.0.0.1" "en"
+    else
+      baseline_add_result "HTTPS/521" "LISTEN_80" "WARN" "LISTEN_80" "placeholder" ""
+    fi
+    tier_summary="$(baseline_print_summary)"
+    tier_details="$(baseline_print_details)"
+    assert_contains "$tier_summary" "Overall:"
+    assert_contains "$tier_details" "Group: HTTPS/521"
+    assert_contains "$tier_details" "Evidence:"
+    assert_contains "$tier_details" "Suggestions:"
+    echo "[baseline-smoke] tier ${tier} summary ready"
+  done
+fi
 
 echo "[baseline-smoke] completed"

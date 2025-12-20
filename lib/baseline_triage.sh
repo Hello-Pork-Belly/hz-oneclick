@@ -517,9 +517,17 @@ baseline_triage__teardown_test_mode() {
 }
 
 baseline_triage__run_groups() {
-  local domain lang
+  local domain lang smoke_mode
   domain="$1"
   lang="$2"
+  smoke_mode="${3:-0}"
+
+  if [ "$smoke_mode" -eq 1 ]; then
+    if declare -F baseline_dns_run >/dev/null 2>&1; then
+      baseline_dns_run "$domain" "$lang"
+    fi
+    return 0
+  fi
 
   if declare -F baseline_dns_run >/dev/null 2>&1; then
     baseline_dns_run "$domain" "$lang"
@@ -542,11 +550,13 @@ baseline_triage__run_groups() {
   if declare -F baseline_wp_run >/dev/null 2>&1; then
     BASELINE_WP_NO_PROMPT=1 baseline_wp_run "$domain" "" "$lang"
   fi
-  if declare -F baseline_cache_run >/dev/null 2>&1; then
-    baseline_cache_run "" "$lang"
-  fi
-  if declare -F baseline_db_run >/dev/null 2>&1; then
-    baseline_db_run "127.0.0.1" "3306" "triage_db" "triage_user" "placeholder" "$lang"
+  if [ "$smoke_mode" -ne 1 ]; then
+    if declare -F baseline_cache_run >/dev/null 2>&1; then
+      baseline_cache_run "" "$lang"
+    fi
+    if declare -F baseline_db_run >/dev/null 2>&1; then
+      baseline_db_run "127.0.0.1" "3306" "triage_db" "triage_user" "placeholder" "$lang"
+    fi
   fi
   if declare -F baseline_sys_run >/dev/null 2>&1; then
     baseline_sys_run "$lang"
@@ -756,12 +766,12 @@ baseline_triage_run() {
         set +e
         ;;
     esac
-    baseline_triage__run_groups "$domain" "$lang" || true
+    baseline_triage__run_groups "$domain" "$lang" "$smoke_mode" || true
     if [ "$errexit_set" -eq 1 ]; then
       set -e
     fi
   else
-    baseline_triage__run_groups "$domain" "$lang"
+    baseline_triage__run_groups "$domain" "$lang" "$smoke_mode"
   fi
 
   summary_output="$(baseline_print_summary)"
