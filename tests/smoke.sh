@@ -225,8 +225,7 @@ export_smoke_env() {
 
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
     {
-      echo "HZ_SMOKE_VERDICT=${smoke_verdict}"
-      echo "HZ_SMOKE_STRICT_EFFECTIVE=${strict_effective}"
+      [ -n "$smoke_verdict" ] && echo "HZ_SMOKE_VERDICT=${smoke_verdict}"
       [ -n "$smoke_report_path" ] && echo "HZ_SMOKE_REPORT_PATH=${smoke_report_path}"
       [ -n "$smoke_report_json_path" ] && echo "HZ_SMOKE_REPORT_JSON_PATH=${smoke_report_json_path}"
     } >> "$GITHUB_OUTPUT"
