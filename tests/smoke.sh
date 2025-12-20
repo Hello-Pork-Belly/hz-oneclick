@@ -35,20 +35,12 @@ run_with_timeout() {
   fi
 }
 
-is_truthy() {
-  case "$(printf "%s" "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
-    1|true|yes|y|on)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 smoke_verdict="PASS"
 smoke_report_path=""
 smoke_report_json_path=""
+
+# shellcheck source=/dev/null
+. ./lib/baseline_triage.sh
 
 smoke_verdict_rank() {
   case "$1" in
@@ -123,6 +115,45 @@ export_smoke_env() {
     [ -n "$smoke_report_json_path" ] && echo "HZ_SMOKE_REPORT_JSON_PATH=${smoke_report_json_path}"
   } >> "$GITHUB_ENV"
 }
+
+smoke_finalize() {
+  local exit_status final_exit
+  exit_status="$1"
+  final_exit=2
+
+  export_smoke_env
+  emit_smoke_annotation
+
+  case "$smoke_verdict" in
+    PASS)
+      final_exit=0
+      ;;
+    WARN)
+      if baseline_triage_is_truthy "${HZ_SMOKE_STRICT:-}"; then
+        final_exit=1
+      else
+        final_exit=0
+      fi
+      ;;
+    FAIL)
+      final_exit=1
+      ;;
+    *)
+      final_exit=2
+      ;;
+  esac
+
+  if [ "$exit_status" -ne 0 ] && [ "$final_exit" -eq 0 ]; then
+    final_exit=2
+  fi
+
+  if [ "$final_exit" -eq 0 ]; then
+    echo "[smoke] OK"
+  fi
+  exit "$final_exit"
+}
+
+trap 'smoke_finalize $?' EXIT
 
 validate_json_file() {
   local json_path expected_group
@@ -603,20 +634,3 @@ fi
 
 echo "[smoke] baseline regression suite"
 run_with_timeout 90s env HZ_CI_SMOKE=1 bash tests/baseline_smoke.sh
-
-export_smoke_env
-emit_smoke_annotation
-
-smoke_exit=0
-if [ "$smoke_verdict" = "FAIL" ]; then
-  smoke_exit=1
-elif [ "$smoke_verdict" = "WARN" ]; then
-  if is_truthy "${HZ_SMOKE_STRICT:-}"; then
-    smoke_exit=1
-  fi
-fi
-
-if [ "$smoke_exit" -eq 0 ]; then
-  echo "[smoke] OK"
-fi
-exit "$smoke_exit"

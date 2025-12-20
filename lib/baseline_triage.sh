@@ -138,6 +138,10 @@ baseline_triage__is_truthy() {
   return 1
 }
 
+baseline_triage_is_truthy() {
+  baseline_triage__is_truthy "$@"
+}
+
 baseline_triage__smoke_strict_enabled() {
   baseline_triage__is_truthy "${HZ_SMOKE_STRICT:-0}"
 }
