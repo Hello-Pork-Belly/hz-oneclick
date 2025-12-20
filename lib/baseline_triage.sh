@@ -412,9 +412,9 @@ for arg in "$@"; do
   esac
 done
 if [ "$record_type" = "AAAA" ]; then
-  echo "2001:db8::10"
+  echo "2001:db8::1"
 else
-  echo "203.0.113.20"
+  echo "203.0.113.10"
 fi
 MOCKDIG
   chmod +x "${BASELINE_TRIAGE_MOCK_DIR}/dig"
@@ -422,9 +422,9 @@ MOCKDIG
   cat > "${BASELINE_TRIAGE_MOCK_DIR}/nslookup" <<'MOCKNSLOOKUP'
 #!/usr/bin/env bash
 if echo "$*" | grep -qi "AAAA"; then
-  echo "Address: 2001:db8::10"
+  echo "Address: 2001:db8::1"
 else
-  echo "Address: 203.0.113.20"
+  echo "Address: 203.0.113.10"
 fi
 MOCKNSLOOKUP
   chmod +x "${BASELINE_TRIAGE_MOCK_DIR}/nslookup"
@@ -432,9 +432,9 @@ MOCKNSLOOKUP
   cat > "${BASELINE_TRIAGE_MOCK_DIR}/drill" <<'MOCKDRILL'
 #!/usr/bin/env bash
 if echo "$*" | grep -qi "AAAA"; then
-  echo "2001:db8::10"
+  echo "2001:db8::1"
 else
-  echo "203.0.113.20"
+  echo "203.0.113.10"
 fi
 MOCKDRILL
   chmod +x "${BASELINE_TRIAGE_MOCK_DIR}/drill"
