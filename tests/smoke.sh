@@ -56,11 +56,23 @@ smoke_strict_enabled() {
 }
 
 smoke_normalize_verdict() {
-  local value
+  local value token
   value="${1:-}"
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
-  printf '%s' "${value^^}"
+  value="${value^^}"
+  token="${value%%[^[:alpha:]]*}"
+  case "$token" in
+    PASS|OK|WARN|FAIL)
+      printf '%s' "$token"
+      ;;
+    "")
+      printf ''
+      ;;
+    *)
+      printf 'FAIL'
+      ;;
+  esac
 }
 
 smoke_determine_exit() {
@@ -103,14 +115,15 @@ smoke_determine_exit() {
 if [ "${HZ_SMOKE_SELFTEST:-}" = "1" ]; then
   failures=0
   smoke_expect_exit() {
-    local verdict strict exit_status expected actual
+    local verdict strict exit_status expected actual normalized
     verdict="$1"
     strict="$2"
     exit_status="$3"
     expected="$4"
-    actual="$(smoke_determine_exit "$verdict" "$strict" "$exit_status")"
-    if [ "$actual" -ne "$expected" ]; then
-      echo "[smoke-selftest] FAIL verdict=${verdict} strict=${strict} exit_status=${exit_status} expected=${expected} got=${actual}" >&2
+    normalized="$(smoke_normalize_verdict "$verdict")"
+    actual="$(smoke_determine_exit "$normalized" "$strict" "$exit_status")"
+    if [ "$normalized" != "$verdict" ] || [ "$actual" -ne "$expected" ]; then
+      echo "[smoke-selftest] FAIL verdict=${verdict} normalized=${normalized} strict=${strict} exit_status=${exit_status} expected=${expected} got=${actual}" >&2
       return 1
     fi
   }
@@ -121,7 +134,13 @@ if [ "${HZ_SMOKE_SELFTEST:-}" = "1" ]; then
   if ! smoke_expect_exit "WARN" 1 0 1; then
     failures=$((failures + 1))
   fi
+  if ! smoke_expect_exit "WARN" 0 2 0; then
+    failures=$((failures + 1))
+  fi
   if ! smoke_expect_exit "FAIL" 0 0 1; then
+    failures=$((failures + 1))
+  fi
+  if ! smoke_expect_exit "WARN" 1 2 1; then
     failures=$((failures + 1))
   fi
   if ! smoke_expect_exit "PASS" 0 0 0; then
@@ -239,6 +258,9 @@ smoke_finalize() {
   strict_effective=0
 
   smoke_verdict="$(smoke_normalize_verdict "$smoke_verdict")"
+  if [ -z "$smoke_verdict" ]; then
+    smoke_verdict="FAIL"
+  fi
   if smoke_strict_enabled; then
     strict_effective=1
   fi

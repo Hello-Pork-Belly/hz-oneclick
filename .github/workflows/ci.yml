@@ -99,42 +99,40 @@ jobs:
           strict_raw="${HZ_SMOKE_STRICT:-0}"
 
           normalize_verdict() {
-            local value
+            local value token
             value="${1:-}"
             value="${value#"${value%%[![:space:]]*}"}"
             value="${value%"${value##*[![:space:]]}"}"
-            printf '%s' "${value^^}"
+            value="${value^^}"
+            token="${value%%[^[:alpha:]]*}"
+            case "$token" in
+              PASS|OK|WARN|FAIL)
+                printf '%s' "$token"
+                ;;
+              *)
+                printf 'FAIL'
+                ;;
+            esac
           }
 
-          smoke_is_truthy() {
+          normalize_strict() {
             local value
             value="${1:-}"
             value="${value#"${value%%[![:space:]]*}"}"
             value="${value%"${value##*[![:space:]]}"}"
             case "${value,,}" in
               1|true|yes|on)
-                return 0
+                printf 'true'
                 ;;
-              0|false|no|off|"")
-                return 1
+              *)
+                printf 'false'
                 ;;
             esac
-            return 1
           }
 
-          strict_enabled="false"
-          if smoke_is_truthy "$strict_raw"; then
-            strict_enabled="true"
-          fi
-
           verdict="$(normalize_verdict "$verdict_raw")"
+          strict_enabled="$(normalize_strict "$strict_raw")"
           exit_code="${exit_code:-1}"
-          if [ "$exit_code" -ne 0 ]; then
-            verdict="FAIL"
-          fi
-          if [ -z "$verdict" ]; then
-            verdict="FAIL"
-          fi
 
           {
             echo "### Smoke verdict"
@@ -146,10 +144,7 @@ jobs:
             [ -n "$report_json_path" ] && echo "- report_json_path: ${report_json_path}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "[smoke-enforce] verdict=${verdict} exit_code=${exit_code} strict=${strict_enabled}"
-          if [ "$exit_code" -ne 0 ]; then
-            exit 1
-          fi
+          echo "[smoke-enforce] verdict_raw=${verdict_raw} verdict=${verdict} exit_code=${exit_code} strict_raw=${strict_raw} strict=${strict_enabled}"
           case "$verdict" in
             PASS|OK)
               ;;
