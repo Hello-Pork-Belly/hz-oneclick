@@ -14,6 +14,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Smoke selftest
+        run: |
+          set -euo pipefail
+          HZ_SMOKE_SELFTEST=1 bash tests/smoke.sh
+
       - name: Smoke test (safe)
         id: smoke
         continue-on-error: true

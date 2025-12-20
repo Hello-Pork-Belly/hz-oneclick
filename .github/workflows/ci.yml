@@ -59,6 +59,11 @@ jobs:
           mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './modules/*' -print0)
           shfmt -d -i 2 -ci -sr "${files[@]}" || true
 
+      - name: Smoke selftest
+        run: |
+          set -euo pipefail
+          HZ_SMOKE_SELFTEST=1 bash tests/smoke.sh
+
       - name: Smoke test (safe)
         if: always()
         id: smoke
