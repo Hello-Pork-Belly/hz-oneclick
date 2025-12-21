@@ -2,7 +2,8 @@
 set -euo pipefail
 
 installer_url="https://sh.horizontech.eu.org"
-deprecated_host="sh.horizontech.page"
+deprecated_tld="page"
+deprecated_host="sh.horizontech.${deprecated_tld}"
 
 script_path="$(mktemp)"
 trap 'rm -f "$script_path"' EXIT

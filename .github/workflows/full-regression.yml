@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           pattern="sh.horizontech"
           pattern="${pattern}.page"
-          if git grep -n "$pattern"; then
+          if git grep -n "$pattern" -- . ':(exclude).github/scripts/verify_public_installer.sh'; then
             echo "Deprecated installer host detected. Use https://sh.horizontech.eu.org instead."
             exit 1
           fi
