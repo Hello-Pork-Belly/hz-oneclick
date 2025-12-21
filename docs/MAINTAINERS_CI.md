@@ -9,18 +9,14 @@
 - Maintainers can run the manual **Verify Public Installer (Strict)** workflow to validate reachability/content.
   - Default target URL: `https://sh.horizontech.eu.org`.
   - The workflow runs `HZ_PUBLIC_INSTALLER_STRICT=1` and fails if the download is blocked or invalid.
-- Note: `curl ... | head` can emit `curl: (23) Failure writing output to destination` when `head` closes the pipe early.
-  Prefer downloading to a file first, then inspect/grep:
+- Note: `curl ... | head` or `curl ... | grep -q` can emit `curl: (23) Failure writing output to destination` because the downstream command closes the pipe early. This is expected.
+  Prefer downloading to a file first, then inspect/grep to avoid the warning:
 
 ```bash
-tmp_installer="$(mktemp)"
-curl -fsSL https://sh.horizontech.eu.org -o "$tmp_installer"
-head -n 20 "$tmp_installer"
-deprecated_label="sh.horizontech"
-deprecated_tld="page"
-deprecated_host="${deprecated_label}.${deprecated_tld}"
-grep -n -F "$deprecated_host" "$tmp_installer"
-rm -f "$tmp_installer"
+tmp=/tmp/hz-installer.sh
+curl -fsSL https://sh.horizontech.eu.org -o "$tmp"
+head -n 5 "$tmp"
+grep -n "sh\\.horizontech\\.page" "$tmp" && echo "BAD" || echo "OK"
 ```
 
 ## Run CI checks locally
