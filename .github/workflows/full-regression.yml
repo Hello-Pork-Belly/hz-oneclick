@@ -19,6 +19,10 @@ jobs:
           # Maintainers may set HZ_PUBLIC_INSTALLER_STRICT=1 on self-hosted/manual runs.
           bash .github/scripts/verify_public_installer.sh
 
+      - name: Check installer header
+        run: |
+          bash .github/scripts/check_installer_header.sh
+
       - name: Guard against deprecated installer host
         run: |
           set -euo pipefail
