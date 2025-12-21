@@ -6,6 +6,7 @@
 
 - Public install uses `https://sh.horizontech.eu.org` (served as a bash script).
 - CI verifies the public endpoint on GitHub-hosted runners; no self-hosted runner is needed.
+- Self-hosted/manual verification can set `HZ_PUBLIC_INSTALLER_STRICT=1` to fail CI if the download is blocked.
 
 ## Run CI checks locally
 
