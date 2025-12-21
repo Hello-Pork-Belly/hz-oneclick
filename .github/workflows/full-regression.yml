@@ -23,16 +23,9 @@ jobs:
         run: |
           bash .github/scripts/check_installer_header.sh
 
-      - name: Guard against deprecated installer host
+      - name: Repository integrity checks
         run: |
-          set -euo pipefail
-          deprecated_label="sh.horizontech"
-          deprecated_tld="page"
-          deprecated_host="${deprecated_label}.${deprecated_tld}"
-          if git grep -n -F "$deprecated_host"; then
-            echo "Deprecated installer host detected. Use https://sh.horizontech.eu.org instead."
-            exit 1
-          fi
+          bash .github/scripts/verify_repo_integrity.sh
 
       - name: Install tools
         run: |
