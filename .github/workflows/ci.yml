@@ -67,72 +67,7 @@ jobs:
       - name: Smoke gating self-check
         run: |
           set -euo pipefail
-
-          normalize_verdict() {
-            local value token
-            value="${1:-}"
-            value="${value#"${value%%[![:space:]]*}"}"
-            value="${value%"${value##*[![:space:]]}"}"
-            value="${value^^}"
-            token="$(printf '%s' "$value" | grep -Eo '(PASS|OK|WARN|FAIL)' | head -n1 || true)"
-            if [ -n "$token" ]; then
-              printf '%s' "$token"
-            else
-              printf 'FAIL'
-            fi
-          }
-
-          enforce_verdict() {
-            local verdict_raw strict exit_code verdict
-            verdict_raw="$1"
-            strict="$2"
-            exit_code="$3"
-            verdict="$(normalize_verdict "$verdict_raw")"
-
-            if { [ "$verdict" = "PASS" ] || [ "$verdict" = "OK" ]; } && [ "$exit_code" -ne 0 ]; then
-              verdict="FAIL"
-            fi
-
-            case "$verdict" in
-              PASS|OK)
-                return 0
-                ;;
-              WARN)
-                if [ "$strict" -eq 1 ]; then
-                  return 1
-                fi
-                return 0
-                ;;
-              FAIL|*)
-                return 1
-                ;;
-            esac
-          }
-
-          require_result() {
-            local label strict verdict exit_code expected
-            label="$1"
-            strict="$2"
-            verdict="$3"
-            exit_code="$4"
-            expected="$5"
-            if enforce_verdict "$verdict" "$strict" "$exit_code"; then
-              actual=0
-            else
-              actual=1
-            fi
-            if [ "$actual" -ne "$expected" ]; then
-              echo "[smoke-gating] ${label} strict=${strict} verdict=${verdict} exit_code=${exit_code} expected=${expected} got=${actual}" >&2
-              exit 1
-            fi
-          }
-
-          require_result "case-a-nonstrict" 0 "PASS" 0 0
-          require_result "case-a-strict" 1 "PASS" 0 0
-          require_result "case-b-nonstrict" 0 "WARN" 1 0
-          require_result "case-b-strict" 1 "WARN" 1 1
-          require_result "case-c-nonstrict" 0 "FAIL" 1 1
-          require_result "case-c-strict" 1 "FAIL" 1 1
+          bash .github/scripts/smoke_gating.sh self-test
 
       - name: Smoke test (safe)
         if: always()
@@ -187,42 +122,14 @@ jobs:
           report_path="${{ steps.smoke.outputs.smoke_report_path }}"
           report_json_path="${{ steps.smoke.outputs.smoke_report_json_path }}"
           strict_raw="${HZ_SMOKE_STRICT:-0}"
+          set +e
+          enforce_output="$(bash .github/scripts/smoke_gating.sh enforce --verdict "$verdict_raw" --exit-code "$exit_code" --strict "$strict_raw")"
+          enforce_status=$?
+          set -e
 
-          normalize_verdict() {
-            local value token
-            value="${1:-}"
-            value="${value#"${value%%[![:space:]]*}"}"
-            value="${value%"${value##*[![:space:]]}"}"
-            value="${value^^}"
-            token="$(printf '%s' "$value" | grep -Eo '(PASS|OK|WARN|FAIL)' | head -n1 || true)"
-            if [ -n "$token" ]; then
-              printf '%s' "$token"
-            else
-              printf 'FAIL'
-            fi
-          }
-
-          normalize_strict() {
-            local value
-            value="${1:-}"
-            value="${value#"${value%%[![:space:]]*}"}"
-            value="${value%"${value##*[![:space:]]}"}"
-            case "${value,,}" in
-              1|true|yes|on)
-                printf 'true'
-                ;;
-              *)
-                printf 'false'
-                ;;
-            esac
-          }
-
-          verdict="$(normalize_verdict "$verdict_raw")"
-          strict_enabled="$(normalize_strict "$strict_raw")"
+          verdict="$(printf '%s' "$enforce_output" | sed -n 's/.*verdict=\\([^ ]*\\).*/\\1/p')"
+          strict_enabled="$(printf '%s' "$enforce_output" | sed -n 's/.*strict=\\([^ ]*\\).*/\\1/p')"
           exit_code="${exit_code:-1}"
-          if { [ "$verdict" = "PASS" ] || [ "$verdict" = "OK" ]; } && [ "$exit_code" -ne 0 ]; then
-            verdict="FAIL"
-          fi
 
           {
             echo "### Smoke verdict"
@@ -234,19 +141,5 @@ jobs:
             [ -n "$report_json_path" ] && echo "- report_json_path: ${report_json_path}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "[smoke-enforce] verdict_raw=${verdict_raw} verdict=${verdict} exit_code=${exit_code} strict_raw=${strict_raw} strict=${strict_enabled}"
-          case "$verdict" in
-            PASS|OK)
-              ;;
-            WARN)
-              if [ "$strict_enabled" = "true" ]; then
-                exit 1
-              fi
-              ;;
-            FAIL)
-              exit 1
-              ;;
-            *)
-              exit 1
-              ;;
-          esac
+          echo "$enforce_output"
+          exit "$enforce_status"
