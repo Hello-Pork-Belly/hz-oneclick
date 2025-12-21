@@ -4,7 +4,9 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 installer_path="${HZ_INSTALLER_PATH:-${repo_root}/hz.sh}"
 expected_shebang='#!/usr/bin/env bash'
-deprecated_host="sh.horizontech.page"
+deprecated_label="sh.horizontech"
+deprecated_tld=".page"
+deprecated_host="${deprecated_label}${deprecated_tld}"
 
 if [ ! -f "$installer_path" ]; then
   echo "FAIL: Installer script not found at ${installer_path}."
@@ -19,7 +21,7 @@ if [ "$first_line" != "$expected_shebang" ]; then
 fi
 
 if grep -n -F "$deprecated_host" "$installer_path"; then
-  echo "FAIL: Deprecated installer host detected: sh.horizontech.page. Use https://sh.horizontech.eu.org instead."
+  echo "FAIL: Deprecated installer host detected: ${deprecated_host}. Use https://sh.horizontech.eu.org instead."
   exit 1
 fi
 
