@@ -5,8 +5,10 @@
 ## Public installer endpoint
 
 - Public install uses `https://sh.horizontech.eu.org` (served as a bash script).
-- CI verifies the public endpoint on GitHub-hosted runners; no self-hosted runner is needed.
-- Self-hosted/manual verification can set `HZ_PUBLIC_INSTALLER_STRICT=1` to fail CI if the download is blocked.
+- CI verifies the public endpoint in non-strict mode on GitHub-hosted runners; no self-hosted runner is needed.
+- Maintainers can run the manual **Verify Public Installer (Strict)** workflow to validate reachability/content.
+  - Default target URL: `https://sh.horizontech.eu.org`.
+  - The workflow runs `HZ_PUBLIC_INSTALLER_STRICT=1` and fails if the download is blocked or invalid.
 
 ## Run CI checks locally
 
