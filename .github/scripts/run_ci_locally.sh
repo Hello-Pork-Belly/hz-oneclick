@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 install_status="SKIP"
+integrity_status=1
 lint_status=1
 selftest_status=1
 smoke_exit_code=1
@@ -38,6 +39,13 @@ else
   install_status="SKIP"
   echo "WARN: apt-get not available; install shellcheck/shfmt manually if needed"
 fi
+
+echo ""
+echo "==> Repository integrity checks"
+set +e
+bash .github/scripts/verify_repo_integrity.sh
+integrity_status=$?
+set -e
 
 echo ""
 echo "==> Bash lint"
@@ -86,7 +94,7 @@ enforce_strict="${enforce_strict:-false}"
 
 final_verdict="$enforce_verdict"
 final_exit="$enforce_status"
-if [ "$lint_status" -ne 0 ] || [ "$selftest_status" -ne 0 ] || [ "$enforce_status" -ne 0 ]; then
+if [ "$integrity_status" -ne 0 ] || [ "$lint_status" -ne 0 ] || [ "$selftest_status" -ne 0 ] || [ "$enforce_status" -ne 0 ]; then
   final_verdict="FAIL"
   final_exit=1
 fi
@@ -94,6 +102,11 @@ fi
 echo ""
 echo "==> CI parity summary"
 echo "- install_tools: ${install_status}"
+if [ "$integrity_status" -eq 0 ]; then
+  echo "- repo_integrity: PASS"
+else
+  echo "- repo_integrity: FAIL (exit=${integrity_status})"
+fi
 if [ "$lint_status" -eq 0 ]; then
   echo "- lint_bash: PASS"
 else
