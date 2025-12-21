@@ -27,7 +27,7 @@ HorizonTech 的一键安装脚本合集。
 bash <(curl -fsSL https://sh.horizontech.eu.org)
 
 ```
-> 说明：旧的 `https://sh.horizontech.page` 可能在过渡期内仍可用，但请以 `https://sh.horizontech.eu.org` 为准。
+> 说明：旧的 https://sh.horizontech.page 可能在过渡期内仍可用，但请以 https://sh.horizontech.eu.org 为准。
 或直接从 GitHub Raw 调用：
 
 ```bash
@@ -42,6 +42,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 - PR 描述需严格按照模板填写，并确保 Summary、Testing 等必填项完整。
 
 ## CI 说明
+
+CI 与 GitHub Actions/self-hosted runners 仅供维护者与验证使用，公开用户通过 curl 安装时不需要配置任何 runner。
 
 ### Run CI checks locally
 
