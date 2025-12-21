@@ -42,6 +42,22 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
 
 ## CI 说明
 
+### Run CI checks locally
+
+Prerequisites: bash, grep, curl (optional: shellcheck, shfmt).
+
+```bash
+bash .github/scripts/run_ci_locally.sh
+```
+
+```bash
+bash .github/scripts/lint_bash.sh
+```
+
+```bash
+bash .github/scripts/smoke_gating.sh self-test
+```
+
 ### PR Smoke（快速检查）
 
 - 触发方式：`pull_request` / `push`。
