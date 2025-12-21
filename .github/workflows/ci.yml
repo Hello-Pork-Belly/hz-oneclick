@@ -26,7 +26,10 @@ jobs:
       - name: Guard against deprecated installer host
         run: |
           set -euo pipefail
-          if git grep -n -E "sh\\.horizontech\\.page"; then
+          deprecated_label="sh.horizontech"
+          deprecated_tld="page"
+          deprecated_host="${deprecated_label}.${deprecated_tld}"
+          if git grep -n -F "$deprecated_host"; then
             echo "Deprecated installer host detected. Use https://sh.horizontech.eu.org instead."
             exit 1
           fi
