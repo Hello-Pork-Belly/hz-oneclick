@@ -58,14 +58,18 @@ bash .github/scripts/lint_bash.sh
 bash .github/scripts/smoke_gating.sh self-test
 ```
 
-### Self-hosted E2E (manual)
+### Real-machine E2E (self-hosted)
 
 - Runner labels must include:
-  - x64: `self-hosted`, `linux`, `x64`, `hz-e2e`
-  - arm64: `self-hosted`, `linux`, `arm64`, `hz-e2e`
-- Trigger the `E2E Self-hosted` workflow via `workflow_dispatch` and optionally set:
-  - `smoke_strict` (default `0`) to pass `HZ_SMOKE_STRICT` into the run
-  - `notes` for run visibility (printed to logs)
+  - x64: `self-hosted`, `linux`, `x64`, `hz-e2e-x64`
+  - arm64: `self-hosted`, `linux`, `arm64`, `hz-e2e-arm64`
+- Trigger the `E2E Self-hosted` workflow via `workflow_dispatch` and set inputs:
+  - `mode`: `preflight` (default, non-destructive) or `install`
+  - `confirm_install`: must be exactly `I_UNDERSTAND_THIS_WILL_MODIFY_THE_MACHINE` to allow `mode=install`
+  - `smoke_strict`: toggle strict smoke gating (maps to `HZ_SMOKE_STRICT`)
+  - `notes`: optional run notes (printed to logs)
+- Safety model: defaults to preflight checks only; install mode is blocked unless the confirmation string is provided.
+- Intended for dedicated test machines only.
 - Validates the same local CI parity checks via `.github/scripts/run_ci_locally.sh` on real machines.
 
 ### PR Smoke（快速检查）

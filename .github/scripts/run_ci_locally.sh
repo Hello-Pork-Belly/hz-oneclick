@@ -13,13 +13,17 @@ smoke_report_json_path="unknown"
 enforce_status=1
 enforce_verdict="FAIL"
 enforce_strict="false"
+smoke_strict="${HZ_SMOKE_STRICT:-0}"
 
 echo "==> CI parity runner (local)"
 cd "$repo_root"
 
 echo ""
 echo "==> Install CI tools (best effort)"
-if command -v apt-get >/dev/null 2>&1; then
+if [ "${HZ_SKIP_CI_TOOLS_INSTALL:-0}" = "1" ]; then
+  install_status="SKIP"
+  echo "INFO: skipping CI tools installation (HZ_SKIP_CI_TOOLS_INSTALL=1)"
+elif command -v apt-get >/dev/null 2>&1; then
   set +e
   bash .github/scripts/install_ci_tools.sh
   install_exit=$?
@@ -53,7 +57,7 @@ echo ""
 echo "==> Smoke test (safe run)"
 smoke_output_file="$(mktemp)"
 set +e
-GITHUB_OUTPUT="$smoke_output_file" HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 bash tests/smoke.sh
+GITHUB_OUTPUT="$smoke_output_file" HZ_CI_SMOKE=1 HZ_SMOKE_STRICT="$smoke_strict" bash tests/smoke.sh
 smoke_exit_code=$?
 set -e
 
@@ -71,7 +75,7 @@ rm -f "$smoke_output_file"
 echo ""
 echo "==> Enforce smoke verdict"
 set +e
-enforce_output="$(bash .github/scripts/smoke_gating.sh enforce --verdict "$smoke_verdict" --exit-code "$smoke_exit_code" --strict "0")"
+enforce_output="$(bash .github/scripts/smoke_gating.sh enforce --verdict "$smoke_verdict" --exit-code "$smoke_exit_code" --strict "$smoke_strict")"
 enforce_status=$?
 set -e
 
