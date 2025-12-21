@@ -31,24 +31,34 @@ jobs:
           fi
 
       - name: Bash syntax check
-        continue-on-error: true
         run: |
           set -euo pipefail
-          mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './modules/*' -print0)
+          mapfile -d '' -t files < <(find ./modules ./tests ./.github/scripts -type f -name '*.sh' -print0)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No shell scripts found for bash -n"
+            exit 0
+          fi
           echo "Found ${#files[@]} shell scripts for bash -n"
+          exit_code=0
           for f in "${files[@]}"; do
-            bash -n "$f" || exit_code=$?
+            if ! bash -n "$f"; then
+              exit_code=1
+            fi
           done
-          if [[ -n "${exit_code:-}" ]]; then
-            echo "WARN: bash -n reported syntax issues"
-            exit "$exit_code"
+          if [[ $exit_code -ne 0 ]]; then
+            echo "ERROR: bash -n reported syntax issues"
+            exit 1
           fi
 
       - name: ShellCheck
         continue-on-error: true
         run: |
           set -euo pipefail
-          mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './modules/*' -print0)
+          mapfile -d '' -t files < <(find ./modules ./tests ./.github/scripts -type f -name '*.sh' -print0)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No shell scripts found for ShellCheck"
+            exit 0
+          fi
           echo "Found ${#files[@]} shell scripts"
           shellcheck -x "${files[@]}" || true
 
@@ -56,7 +66,11 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './modules/*' -print0)
+          mapfile -d '' -t files < <(find ./modules ./tests ./.github/scripts -type f -name '*.sh' -print0)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No shell scripts found for shfmt"
+            exit 0
+          fi
           shfmt -d -i 2 -ci -sr "${files[@]}" || true
 
       - name: Smoke selftest
