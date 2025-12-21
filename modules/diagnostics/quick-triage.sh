@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HZ_TRIAGE_RAW_BASE="${HZ_TRIAGE_RAW_BASE:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
+HZ_TRIAGE_RAW_BASE="${HZ_TRIAGE_RAW_BASE:-$HZ_INSTALL_BASE_URL}"
 HZ_TRIAGE_TMP="$(mktemp -d /tmp/hz-oneclick-triage-XXXXXX)"
 HZ_TRIAGE_KEEP_TMP="${HZ_TRIAGE_KEEP_TMP:-0}"
 HZ_TRIAGE_USE_LOCAL="${HZ_TRIAGE_USE_LOCAL:-0}"

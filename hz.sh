@@ -9,6 +9,8 @@ yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 # 全局语言变量：en / zh
 HZ_LANG=""
 HZ_BASELINE_FORMAT="${HZ_BASELINE_FORMAT:-text}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
 
 baseline_menu_normalize_format() {
   local format
@@ -247,7 +249,7 @@ main_menu() {
           ;;
         2)
           echo "Running rclone basics installer..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/rclone/install.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/rclone/install.sh")
           read -rp "Done. Press Enter to return to menu..." _
           ;;
         3)
@@ -268,25 +270,25 @@ main_menu() {
           ;;
         7)
           echo "Running msmtp + Brevo alert setup..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/mail/setup-msmtp-brevo.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/mail/setup-msmtp-brevo.sh")
           read -rp "Done. Press Enter to return to menu..." _
           ;;
         8)
           echo "Running WordPress backup (DB + files) setup..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/setup-wp-backup-basic-en.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/setup-wp-backup-basic-en.sh")
           read -rp "Done. Press Enter to return to menu..." _
           ;;
         9)
           echo "Running wp-cron helper (system cron for WordPress)..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/gen-wp-cron-en.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/gen-wp-cron-en.sh")
           ;;
         10)
           echo "Installing rkhunter (rootkit / trojan scanner) ..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/install-rkhunter-en.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/install-rkhunter-en.sh")
           ;;
         11)
           echo "rkhunter (setting / optional mail alert)) ..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/setup-rkhunter-cron-en.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron-en.sh")
           ;;
         12)
           baseline_diagnostics_menu
@@ -336,7 +338,7 @@ main_menu() {
           ;;
         2)
           echo "即将安装 rclone 基础模块..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/rclone/install.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/rclone/install.sh")
           read -rp "完成。按回车返回菜单..." _
           ;;
         3)
@@ -357,32 +359,32 @@ main_menu() {
           ;;
         7)
           echo "即将安装 msmtp + Brevo 邮件报警模块..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/mail/setup-msmtp-brevo.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/mail/setup-msmtp-brevo.sh")
           read -rp "完成。按回车返回菜单..." _
           ;;
         8)
           echo "即将安装 WordPress 备份模块（数据库 + 文件）..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/setup-wp-backup-basic.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/setup-wp-backup-basic.sh")
           read -rp "完成。按回车返回菜单..." _
           ;;
         9)
           echo "将运行 wp-cron 定时任务向导..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/gen-wp-cron.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/gen-wp-cron.sh")
           ;;
         10)
           echo "将安装 / 初始化 rkhunter（系统后门 / 木马检测）..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/install-rkhunter.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/install-rkhunter.sh")
           ;;
         11)
           echo "将设置 rkhunter 定时扫描（报错邮件通知 /日志维护）..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/setup-rkhunter-cron.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron.sh")
           ;;
         12)
           baseline_diagnostics_menu
           ;;
         13)
           echo "将安装OLS+WP （ DB/Redis ）..."
-          bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/wp/install-ols-wp-standard.sh)
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/install-ols-wp-standard.sh")
           ;;
         0)
           echo "再见～"

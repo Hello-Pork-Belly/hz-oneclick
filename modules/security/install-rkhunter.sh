@@ -17,6 +17,8 @@
 #       * 对 /var/log/rkhunter.log 做简单截断/轮转（例如保留最近 N 天）
 
 SCRIPT_VERSION="0.1.0"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
 
 # --- 简单输出函数（不依赖 common.sh） ---
 
@@ -285,7 +287,7 @@ EOF
         info "尝试加载：rkhunter 定时任务 + 邮件报警向导 ..."
         # 未来你会在这个位置放置实际脚本
         # modules/security/setup-rkhunter-cron.sh
-        if bash <(curl -fsSL "https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/setup-rkhunter-cron.sh"); then
+        if bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron.sh"); then
           info "已从 hz-oneclick 运行 rkhunter 定时任务向导。"
         else
           error "加载 rkhunter 定时任务向导失败，请检查网络或脚本路径。"

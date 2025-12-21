@@ -3,6 +3,8 @@
 # Install rkhunter and basic check (English)
 
 set -euo pipefail
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
 
 ### helpers ###
 
@@ -109,7 +111,7 @@ read -rp "Please enter your choice [1/2/0]: " choice
 case "$choice" in
   1)
     info "Launching rkhunter scheduling wizard ..."
-    bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/security/setup-rkhunter-cron-en.sh)
+    bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron-en.sh")
     ;;
   2)
     info "Returning to hz-oneclick main menu ..."
