@@ -2,6 +2,11 @@
 
 > Maintainers only. End users installing via curl do **not** need any CI or runner setup.
 
+## Public installer endpoint
+
+- Public install uses `https://sh.horizontech.eu.org` (served as a bash script).
+- CI verifies the public endpoint on GitHub-hosted runners; no self-hosted runner is needed.
+
 ## Run CI checks locally
 
 Prerequisites: bash, grep, curl (optional: shellcheck, shfmt).

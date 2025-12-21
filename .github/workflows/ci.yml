@@ -14,6 +14,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify public installer endpoint
+        run: |
+          bash .github/scripts/verify_public_installer.sh
+
       - name: Guard against deprecated installer host
         run: |
           set -euo pipefail
