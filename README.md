@@ -24,9 +24,10 @@ HorizonTech 的一键安装脚本合集。
 未来会提供类似命令：
 
 ```bash
-bash <(curl -fsSL https://sh.horizontech.page)
+bash <(curl -fsSL https://sh.horizontech.eu.org)
 
 ```
+> 说明：旧的 `https://sh.horizontech.page` 可能在过渡期内仍可用，但请以 `https://sh.horizontech.eu.org` 为准。
 或直接从 GitHub Raw 调用：
 
 ```bash
