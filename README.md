@@ -58,6 +58,16 @@ bash .github/scripts/lint_bash.sh
 bash .github/scripts/smoke_gating.sh self-test
 ```
 
+### Self-hosted E2E (manual)
+
+- Runner labels must include:
+  - x64: `self-hosted`, `linux`, `x64`, `hz-e2e`
+  - arm64: `self-hosted`, `linux`, `arm64`, `hz-e2e`
+- Trigger the `E2E Self-hosted` workflow via `workflow_dispatch` and optionally set:
+  - `smoke_strict` (default `0`) to pass `HZ_SMOKE_STRICT` into the run
+  - `notes` for run visibility (printed to logs)
+- Validates the same local CI parity checks via `.github/scripts/run_ci_locally.sh` on real machines.
+
 ### PR Smoke（快速检查）
 
 - 触发方式：`pull_request` / `push`。
