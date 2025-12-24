@@ -1114,7 +1114,7 @@ show_main_menu() {
   echo "安装档位（LOMP / LNMP）："
   echo "  1) LOMP-Lite（Frontend-only，仅部署前端，DB/Redis 外置）"
   echo "  2) LOMP-Standard（前后端一体，含本地 DB/Redis）"
-  echo "  3) LOMP-Hub（集中式 Hub，当前为占位/仅提示）"
+  echo "  3) LOMP-Hub（集中式 Hub，本机 DB/Redis + 本地站点）"
   echo "  4) LNMP-Lite（占位/仅提示）"
   echo "  5) LNMP-Standard（占位/仅提示）"
   echo "  6) LNMP-Hub（占位/仅提示）"
@@ -2067,12 +2067,300 @@ install_standard_flow() {
   esac
 }
 
+is_private_ip() {
+  local ip="${1:-}"
+
+  if [[ "$ip" == "127.0.0.1" ]]; then
+    return 0
+  fi
+
+  if [[ "$ip" =~ ^10\. ]] \
+    || [[ "$ip" =~ ^192\.168\. ]] \
+    || [[ "$ip" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] \
+    || [[ "$ip" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\. ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+prompt_hub_bind_host() {
+  while :; do
+    read -rp "请输入 Hub 服务绑定地址（默认 127.0.0.1，如需内网访问可填写内网 IP）: " HUB_BIND_HOST
+    HUB_BIND_HOST="${HUB_BIND_HOST:-127.0.0.1}"
+
+    if is_private_ip "$HUB_BIND_HOST"; then
+      break
+    fi
+
+    log_warn "仅允许绑定到 127.0.0.1 或内网 IP。请重新输入。"
+  done
+}
+
+prompt_secret_confirm() {
+  local prompt="$1"
+  local secret confirm
+
+  while :; do
+    read -rsp "$prompt" secret
+    echo
+    if [ -z "$secret" ]; then
+      log_warn "输入不能为空，请重试。"
+      continue
+    fi
+
+    read -rsp "请再次输入确认: " confirm
+    echo
+    if [ "$secret" != "$confirm" ]; then
+      log_error "两次输入不一致，请重新输入。"
+      continue
+    fi
+
+    printf "%s" "$secret"
+    return 0
+  done
+}
+
+ensure_docker_installed() {
+  if command -v docker >/dev/null 2>&1; then
+    log_info "检测到 Docker 已安装。"
+  else
+    log_step "安装 Docker"
+    apt update
+    apt install -y docker.io
+  fi
+
+  if systemctl is-enabled docker >/dev/null 2>&1; then
+    :
+  else
+    systemctl enable docker
+  fi
+  systemctl start docker
+}
+
+ensure_container_running() {
+  local name="$1"
+
+  if docker ps -a --format '{{.Names}}' | grep -qx "$name"; then
+    if ! docker ps --format '{{.Names}}' | grep -qx "$name"; then
+      docker start "$name" >/dev/null
+    fi
+    return 0
+  fi
+
+  return 1
+}
+
+wait_for_mariadb() {
+  local name="$1"
+  local root_pass="$2"
+  local i
+
+  for i in {1..30}; do
+    if docker exec "$name" mariadb-admin -uroot -p"$root_pass" ping --silent >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+ensure_hub_containers() {
+  local main_db_port=3306
+  local tenant_db_port=3307
+  local main_redis_port=6379
+  local tenant_redis_port=6380
+
+  log_step "检查/初始化 Hub 数据库与 Redis 容器"
+
+  if ! ensure_container_running "main-db"; then
+    log_info "初始化 main-db 容器"
+    MAIN_DB_ROOT_PASS="$(prompt_secret_confirm "设置 main-db root 密码（仅用于初始化，不会回显）: ")"
+    docker volume create main-db-data >/dev/null
+    docker run -d \
+      --name main-db \
+      -e MARIADB_ROOT_PASSWORD="$MAIN_DB_ROOT_PASS" \
+      -p "${HUB_BIND_HOST}:${main_db_port}:3306" \
+      -v main-db-data:/var/lib/mysql \
+      --restart unless-stopped \
+      mariadb:10.11 >/dev/null
+  else
+    log_info "main-db 容器已存在。"
+  fi
+
+  if ! ensure_container_running "tenant-db"; then
+    log_info "初始化 tenant-db 容器"
+    TENANT_DB_ROOT_PASS="$(prompt_secret_confirm "设置 tenant-db root 密码（仅用于初始化，不会回显）: ")"
+    docker volume create tenant-db-data >/dev/null
+    docker run -d \
+      --name tenant-db \
+      -e MARIADB_ROOT_PASSWORD="$TENANT_DB_ROOT_PASS" \
+      -p "${HUB_BIND_HOST}:${tenant_db_port}:3306" \
+      -v tenant-db-data:/var/lib/mysql \
+      --restart unless-stopped \
+      mariadb:10.11 >/dev/null
+  else
+    log_info "tenant-db 容器已存在。"
+  fi
+
+  if ! ensure_container_running "main-redis"; then
+    log_info "初始化 main-redis 容器"
+    docker volume create main-redis-data >/dev/null
+    docker run -d \
+      --name main-redis \
+      -p "${HUB_BIND_HOST}:${main_redis_port}:6379" \
+      -v main-redis-data:/data \
+      --restart unless-stopped \
+      redis:7-alpine redis-server --appendonly yes >/dev/null
+  else
+    log_info "main-redis 容器已存在。"
+  fi
+
+  if ! ensure_container_running "tenant-redis"; then
+    log_info "初始化 tenant-redis 容器"
+    docker volume create tenant-redis-data >/dev/null
+    docker run -d \
+      --name tenant-redis \
+      -p "${HUB_BIND_HOST}:${tenant_redis_port}:6379" \
+      -v tenant-redis-data:/data \
+      --restart unless-stopped \
+      redis:7-alpine redis-server --appendonly yes >/dev/null
+  else
+    log_info "tenant-redis 容器已存在。"
+  fi
+}
+
+setup_hub_local_db() {
+  local opt
+  local esc_db_password
+  local default_db_name="${SITE_SLUG}_wp"
+  local default_db_user="${SITE_SLUG}_user"
+
+  log_step "初始化本机站点数据库（main-db）"
+
+  while :; do
+    read -rp "DB 名称（默认 ${default_db_name}）: " DB_NAME
+    DB_NAME="${DB_NAME:-${default_db_name}}"
+    [ -n "$DB_NAME" ] && break
+  done
+
+  while :; do
+    read -rp "DB 用户名（默认 ${default_db_user}）: " DB_USER
+    DB_USER="${DB_USER:-${default_db_user}}"
+    [ -n "$DB_USER" ] && break
+  done
+
+  DB_PASSWORD="$(prompt_secret_confirm "DB 密码（不会回显，请牢记）: ")"
+
+  while :; do
+    if [ -z "${MAIN_DB_ROOT_PASS:-}" ]; then
+      read -rsp "请输入 main-db root 密码（不会回显）: " MAIN_DB_ROOT_PASS
+      echo
+      if [ -z "$MAIN_DB_ROOT_PASS" ]; then
+        log_warn "main-db root 密码不能为空。"
+        continue
+      fi
+    fi
+
+    if ! wait_for_mariadb "main-db" "$MAIN_DB_ROOT_PASS"; then
+      log_error "main-db 未就绪，请稍后重试。"
+      MAIN_DB_ROOT_PASS=""
+    else
+      break
+    fi
+  done
+
+  esc_db_password="${DB_PASSWORD//\\/\\\\}"
+  esc_db_password="${esc_db_password//\'/\\\'}"
+
+  if docker exec -i main-db mariadb -uroot -p"$MAIN_DB_ROOT_PASS" <<SQL
+CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`;
+CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${esc_db_password}';
+GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'%';
+FLUSH PRIVILEGES;
+SQL
+  then
+    log_info "已在 main-db 中创建/校验 ${DB_NAME} 与用户 ${DB_USER}。"
+  else
+    log_error "创建数据库或用户失败，请检查 root 密码是否正确。"
+    MAIN_DB_ROOT_PASS=""
+    echo "-------------------------------------"
+    echo "  1) 重新输入 main-db root 密码"
+    echo "  0) 退出脚本"
+    echo "-------------------------------------"
+    read -rp "请输入选项 [0-1]: " opt
+    case "$opt" in
+      1) setup_hub_local_db ; return ;;
+      0) log_info "已退出脚本。"; exit 1 ;;
+      *) log_warn "输入无效，默认退出脚本。"; exit 1 ;;
+    esac
+  fi
+
+  if docker exec -i main-db mariadb -u"$DB_USER" -p"$DB_PASSWORD" -e "USE \`${DB_NAME}\`; SELECT 1;" >/dev/null 2>&1; then
+    log_info "数据库连通性检查通过：${DB_USER}@main-db/${DB_NAME}。"
+  else
+    log_warn "数据库连通性检查失败，请确认密码正确。"
+  fi
+
+  DB_HOST="$HUB_BIND_HOST"
+}
+
+print_hub_summary() {
+  echo
+  echo -e "${BOLD}Hub 服务摘要${NC}"
+  echo "====================================="
+  echo "main-db:     ${HUB_BIND_HOST}:3306"
+  echo "main-redis:  ${HUB_BIND_HOST}:6379"
+  echo "tenant-db:   ${HUB_BIND_HOST}:3307"
+  echo "tenant-redis:${HUB_BIND_HOST}:6380"
+  echo
+  echo "Next steps（前端节点连接信息）："
+  echo "  - DB_HOST: ${HUB_BIND_HOST}"
+  echo "  - DB_PORT: 3306（main-db）或 3307（tenant-db）"
+  echo "  - Redis Host: ${HUB_BIND_HOST}"
+  echo "  - Redis Port: 6379（main）或 6380（tenant）"
+  echo "  - 仅填写 host/port，DB 密码与 Redis 密码请在各节点自行保存。"
+  echo
+}
+
 install_hub_flow() {
   # [ANCHOR:INSTALL_FLOW_HUB]
-  log_step "LOMP-Hub 档安装流程（占位）"
-  log_warn "Hub 档位安装流程尚未实现，将在后续版本补齐集中式部署指引。"
-  read -rp "按回车返回主菜单..." _
-  show_main_menu
+  local opt
+
+  require_root
+  check_os
+  prompt_site_info
+  prompt_hub_bind_host
+
+  ensure_docker_installed
+  ensure_hub_containers
+  setup_hub_local_db
+
+  install_packages
+  setup_vhost_config
+  download_wordpress
+  generate_wp_config
+  fix_permissions
+  env_self_check
+  configure_ssl
+  print_summary
+  print_hub_summary
+
+  if [ "${POST_SUMMARY_SHOWN:-0}" -eq 0 ]; then
+    show_post_install_summary "${SITE_DOMAIN}"
+  fi
+
+  echo "-------------------------------------"
+  echo "  1) 返回主菜单"
+  echo "  0) 退出脚本"
+  echo "-------------------------------------"
+  read -rp "请输入选项 [0-1]: " opt
+  case "$opt" in
+    1) show_main_menu ;;
+    0) log_info "已退出脚本。"; exit 0 ;;
+    *) log_warn "输入无效，默认退出脚本。"; exit 0 ;;
+  esac
 }
 
 install_lomp_flow() {
