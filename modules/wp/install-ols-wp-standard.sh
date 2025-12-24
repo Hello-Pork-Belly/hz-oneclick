@@ -2011,6 +2011,8 @@ configure_ssl() {
       SSL_MODE="origin-cert"
       local cert_file key_file ssl_prefix ssl_prefix_sanitized
       log_info "你选择了 Origin Certificate 模式。请先在 CDN/加速服务后台生成源站证书。"
+      echo "默认证书路径: /usr/local/lsws/conf/ssl/${SITE_SLUG}.cert.pem"
+      echo "默认私钥路径: /usr/local/lsws/conf/ssl/${SITE_SLUG}.key.pem"
       read -rp "请输入证书/私钥文件名前缀（默认: ${SITE_SLUG}，例如: example）: " ssl_prefix
       ssl_prefix="${ssl_prefix:-$SITE_SLUG}"
       ssl_prefix_sanitized="$(printf '%s' "$ssl_prefix" | tr -cd 'A-Za-z0-9._-')"
