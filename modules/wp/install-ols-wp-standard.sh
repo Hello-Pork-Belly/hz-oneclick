@@ -51,6 +51,8 @@ BOLD="\033[1m"
 NC="\033[0m"
 
 POST_SUMMARY_SHOWN=0
+HTTPS_CHECKS_SHOWN=0
+SSL_MODE="none"
 SITE_SIZE_LIMIT_ENABLED="no"
 SITE_SIZE_LIMIT_GB=""
 SITE_SIZE_CHECK_SCRIPT=""
@@ -1087,6 +1089,8 @@ show_post_install_summary() {
   echo -e "  - 确认系统防火墙已放行 80/443"
   echo -e "  - 确认云防火墙/安全组已放行 80/443"
 
+  print_https_post_install "${domain}"
+
   echo
   echo -e "${CYAN}=========================================================${NC}"
   echo
@@ -2000,9 +2004,11 @@ configure_ssl() {
 
   case "$choice" in
     1)
+      SSL_MODE="http-only"
       log_warn "本次不配置 SSL，仅监听 80。若在 CDN 后台使用严格模式（类似 Full(strict)），源站无证书会导致 521。"
       ;;
     2)
+      SSL_MODE="origin-cert"
       local cert_file key_file ssl_prefix ssl_prefix_sanitized
       log_info "你选择了 Origin Certificate 模式。请先在 CDN/加速服务后台生成源站证书。"
       read -rp "请输入证书/私钥文件名前缀（默认: ${SITE_SLUG}，例如: example）: " ssl_prefix
@@ -2060,6 +2066,7 @@ EOF
       show_post_install_summary "${SITE_DOMAIN}"
       ;;
     3)
+      SSL_MODE="letsencrypt"
       # [ANCHOR:SSL_LE]
       log_info "你选择 Let's Encrypt。请确保：域名 ${SITE_DOMAIN} 已指向本机，且 DNS 记录为灰云。"
       apt install -y certbot
@@ -2114,9 +2121,68 @@ EOF
       show_post_install_summary "${SITE_DOMAIN}"
       ;;
     *)
+      SSL_MODE="unknown"
       log_warn "未知选项，暂不配置 SSL。";
       ;;
   esac
+}
+
+print_https_post_install() {
+  local domain="$1"
+
+  if [ "${HTTPS_CHECKS_SHOWN:-0}" -eq 1 ]; then
+    return
+  fi
+
+  HTTPS_CHECKS_SHOWN=1
+
+  echo
+  echo -e "${CYAN}HTTPS/SSL checklist（安装后自查）:${NC}"
+  echo "  - DNS A/AAAA 记录指向当前服务器公网 IP。"
+  echo "  - 如在反向代理/CDN 后面终止 TLS："
+  echo "    - 确认代理模式已开启（如适用）。"
+  echo "    - 确认边缘证书已签发并处于生效状态（可能需要时间）。"
+  echo "    - 确认边缘到源站连通（按需开放 80/443）。"
+  echo "    - 建议选择“加密到源站”的安全模式（类似严格/完全验证概念），并确保源站证书可用。"
+  if [ "${SSL_MODE:-}" = "letsencrypt" ]; then
+    echo "  - 你选择了本机 TLS（Let's Encrypt）："
+    echo "    - 确认 80/443 对公网可达，DNS 已正确解析。"
+    echo "    - 查看证书签发日志与续期任务是否正常。"
+  fi
+  echo "  - 示例：访问 https://example.com 验证浏览器锁标识。"
+
+  echo
+  echo -e "${CYAN}HTTPS/SSL 自动检查（不影响安装）:${NC}"
+  if ! command -v curl >/dev/null 2>&1; then
+    log_warn "未找到 curl，跳过 HTTPS 检查。"
+    return
+  fi
+
+  if [ -n "$domain" ]; then
+    local curl_output curl_exit status_line
+    curl_output="$(curl -sSIk --max-time 5 "https://${domain}" 2>&1)" || curl_exit=$?
+    status_line="$(printf '%s\n' "$curl_output" | awk 'toupper($0) ~ /^HTTP\\// {print; exit}')"
+
+    if [ -n "${curl_exit:-}" ] && [ "$curl_exit" -ne 0 ]; then
+      log_warn "HTTPS 访问 ${domain} 失败（curl 退出码: ${curl_exit}）。"
+      echo "  - 常见原因：DNS 未生效/未指向本机、代理未开启、边缘证书未生效、源站 443 未开放或源站证书无效。"
+      echo "  - 可重试命令：curl -sSIk --max-time 5 \"https://${domain}\""
+    elif [ -n "$status_line" ]; then
+      log_info "HTTPS 访问 ${domain} 返回：${status_line}"
+    else
+      log_warn "HTTPS 访问 ${domain} 未获取到状态行。"
+      echo "  - 可重试命令：curl -sSIk --max-time 5 \"https://${domain}\""
+    fi
+  else
+    log_warn "未检测到域名，跳过 https 域名检查。"
+  fi
+
+  if ! curl -sSIk --max-time 3 -k "https://127.0.0.1" >/dev/null 2>&1; then
+    log_warn "本机 443 未能建立 TLS 连接，可能尚未启用源站 HTTPS。"
+    echo "  - 如需源站 HTTPS，请确认 443 监听、证书路径和防火墙配置。"
+  else
+    log_info "本机 443 TLS 连接正常（https://127.0.0.1）。"
+  fi
 }
 
 print_summary() {
@@ -2142,6 +2208,8 @@ print_summary() {
   echo "  2) 确认云厂商安全组和本机防火墙均已放行 80/443;"
   echo "  3) 再在 CDN / 加速服务后台开启代理（橙云）和 HTTPS。"
   echo
+
+  print_https_post_install "${SITE_DOMAIN}"
 }
 
 install_frontend_only_flow() {
