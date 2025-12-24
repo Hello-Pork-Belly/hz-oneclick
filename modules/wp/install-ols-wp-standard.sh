@@ -1933,6 +1933,102 @@ generate_wp_config() {
   log_info "已根据输入生成 wp-config.php（DB_* 信息已写入）。"
 }
 
+ensure_wp_https_urls() {
+  # [ANCHOR:WP_HTTPS_URLS]
+  if [ "${SSL_MODE:-http-only}" = "http-only" ]; then
+    return
+  fi
+
+  local domain=""
+  if [ -n "${SITE_DOMAIN:-}" ]; then
+    domain="$SITE_DOMAIN"
+  elif [ -n "${PRIMARY_DOMAIN:-}" ]; then
+    domain="$PRIMARY_DOMAIN"
+  elif [ -n "${DOMAIN:-}" ]; then
+    domain="$DOMAIN"
+  fi
+
+  if [ -z "$domain" ]; then
+    log_warn "未检测到域名，无法自动设置 WordPress HTTPS 地址。"
+    echo "  可在安装后执行："
+    echo "  wp option update home \"https://YOUR_DOMAIN\" --path=\"${DOC_ROOT}\" --skip-plugins --skip-themes"
+    echo "  wp option update siteurl \"https://YOUR_DOMAIN\" --path=\"${DOC_ROOT}\" --skip-plugins --skip-themes"
+    echo "  或在 ${DOC_ROOT}/wp-config.php 中加入："
+    echo "  define('WP_HOME', 'https://YOUR_DOMAIN');"
+    echo "  define('WP_SITEURL', 'https://YOUR_DOMAIN');"
+    echo "HTTPS URL 更新: 需要手动设置"
+    return
+  fi
+
+  local https_url="https://${domain}"
+  local wp_path="${DOC_ROOT}"
+  local wp_config="${DOC_ROOT}/wp-config.php"
+
+  if command -v wp >/dev/null 2>&1; then
+    if wp core is-installed --path="$wp_path" --skip-plugins --skip-themes >/dev/null 2>&1; then
+      if wp option update home "$https_url" --path="$wp_path" --skip-plugins --skip-themes >/dev/null 2>&1 \
+        && wp option update siteurl "$https_url" --path="$wp_path" --skip-plugins --skip-themes >/dev/null 2>&1; then
+        log_info "已设置 WordPress HTTPS 地址为 ${https_url}。"
+        echo "HTTPS URL 更新: 已自动设置"
+        return
+      fi
+      log_warn "使用 wp-cli 更新 HTTPS 地址失败，尝试写入 wp-config.php。"
+    fi
+  fi
+
+  if [ -f "$wp_config" ]; then
+    local has_home has_siteurl
+    if grep -q "define([\"']WP_HOME[\"']" "$wp_config"; then
+      has_home=1
+    fi
+    if grep -q "define([\"']WP_SITEURL[\"']" "$wp_config"; then
+      has_siteurl=1
+    fi
+
+    if [ -n "${has_home:-}" ]; then
+      awk -v url="$https_url" '
+        $0 ~ /^[[:space:]]*define\([[:space:]]*['\''"]WP_HOME['\''"]/ {
+          print "define('\''WP_HOME'\'', '\''" url "'\'');"
+          next
+        }
+        {print}
+      ' "$wp_config" >"${wp_config}.tmp" && mv "${wp_config}.tmp" "$wp_config"
+    fi
+
+    if [ -n "${has_siteurl:-}" ]; then
+      awk -v url="$https_url" '
+        $0 ~ /^[[:space:]]*define\([[:space:]]*['\''"]WP_SITEURL['\''"]/ {
+          print "define('\''WP_SITEURL'\'', '\''" url "'\'');"
+          next
+        }
+        {print}
+      ' "$wp_config" >"${wp_config}.tmp" && mv "${wp_config}.tmp" "$wp_config"
+    fi
+
+    if [ -z "${has_home:-}" ] || [ -z "${has_siteurl:-}" ]; then
+      awk -v url="$https_url" -v add_home="${has_home:-}" -v add_site="${has_siteurl:-}" '
+        NR==1 {
+          print
+          if(add_home==""){print "define('\''WP_HOME'\'', '\''" url "'\'');"}
+          if(add_site==""){print "define('\''WP_SITEURL'\'', '\''" url "'\'');"}
+          next
+        }
+        {print}
+      ' "$wp_config" >"${wp_config}.tmp" && mv "${wp_config}.tmp" "$wp_config"
+    fi
+
+    log_info "已在 wp-config.php 中设置 WP_HOME/WP_SITEURL 为 ${https_url}。"
+    echo "HTTPS URL 更新: 已自动设置"
+    return
+  fi
+
+  log_warn "未找到 ${wp_config}，无法自动设置 HTTPS 地址。"
+  echo "  可在安装后执行："
+  echo "  wp option update home \"${https_url}\" --path=\"${DOC_ROOT}\" --skip-plugins --skip-themes"
+  echo "  wp option update siteurl \"${https_url}\" --path=\"${DOC_ROOT}\" --skip-plugins --skip-themes"
+  echo "HTTPS URL 更新: 需要手动设置"
+}
+
 fix_permissions() {
   # [ANCHOR:SET_PERMISSIONS]
   log_step "修复站点目录权限"
@@ -2230,6 +2326,7 @@ install_frontend_only_flow() {
   fix_permissions
   env_self_check
   configure_ssl
+  ensure_wp_https_urls
   print_site_size_limit_summary
 
   if [ "${POST_SUMMARY_SHOWN:-0}" -eq 0 ]; then
@@ -2292,6 +2389,7 @@ install_standard_flow() {
   fix_permissions
   env_self_check
   configure_ssl
+  ensure_wp_https_urls
   print_summary
   print_site_size_limit_summary
 
