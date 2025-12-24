@@ -83,7 +83,7 @@ rm -f "$smoke_output_file"
 echo ""
 echo "==> Enforce smoke verdict"
 set +e
-enforce_output="$(bash .github/scripts/smoke_gating.sh enforce --verdict "$smoke_verdict" --exit-code "$smoke_exit_code" --strict "$smoke_strict")"
+enforce_output="$(bash .github/scripts/smoke_gating.sh enforce --verdict "$smoke_verdict" --exit-code "$smoke_exit_code" --strict "$smoke_strict" --report-path "$smoke_report_path" --report-json "$smoke_report_json_path")"
 enforce_status=$?
 set -e
 
