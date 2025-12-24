@@ -955,12 +955,12 @@ print_system_summary() {
   echo -e "${CYAN}---- 网络摘要 ----${NC}"
   echo "公网 IPv4: ${ipv4_display}"
   echo "公网 IPv6: ${ipv6_display}"
-  echo "提示：如需绑定域名请配置 A/AAAA 记录指向上述公网 IP。"
+  echo -e "${RED}提示：如需绑定域名请配置 A/AAAA 记录指向上述公网 IP。${NC}"
 
   echo -e "${CYAN}---- 建议结论 ----${NC}"
   echo "推荐档位: ${RECOMMENDED_TIER}"
   echo "原因: ${RECOMMENDED_REASON}"
-  echo "下一步建议: ${RECOMMENDED_NEXT_STEP}"
+  echo -e "${RED}下一步建议: ${RECOMMENDED_NEXT_STEP}${NC}"
 }
 
 show_lnmp_placeholder() {
