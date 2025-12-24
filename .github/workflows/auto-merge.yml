@@ -28,12 +28,12 @@ jobs:
 
       - name: Self-test required checks parser
         env:
-          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: ./.github/scripts/require_checks.sh --self-test
 
       - name: Verify required checks
         env:
-          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: >
           ./.github/scripts/require_checks.sh
           --pr ${{ github.event.pull_request.number }}
