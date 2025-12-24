@@ -59,9 +59,11 @@ print_report_findings() {
       current_group="${line#Group: }"
       continue
     fi
-    if [[ "$line" =~ ^-\\ \\[(PASS|WARN|FAIL)\\]\\ (.*)$ ]]; then
-      current_status="${BASH_REMATCH[1]}"
-      current_entry="${BASH_REMATCH[2]}"
+    if [[ $line =~ ^\[\[(PASS|WARN|FAIL)\]\][[:space:]]*(.*)$ ]]; then
+      tag="${BASH_REMATCH[1]}"
+      msg="${BASH_REMATCH[2]}"
+      current_status="$tag"
+      current_entry="$msg"
       if [ "$current_status" = "$desired_status" ]; then
         echo "[smoke-enforce] ${status_label}: group=${current_group} check=${current_entry}"
       fi
