@@ -2154,7 +2154,6 @@ ensure_container_running() {
 wait_for_mariadb() {
   local name="$1"
   local root_pass="$2"
-  local i
 
   for _ in {1..30}; do
     if docker exec "$name" mariadb-admin -uroot -p"$root_pass" ping --silent >/dev/null 2>&1; then
