@@ -7,15 +7,15 @@
 
 | ID | Title | Area/File | Current Behavior | Expected Behavior | Fix Plan | Status | PR Link |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | Document default install paths with placeholders | docs/README.md | Paths are inconsistent across docs | Paths use placeholders like `/var/www/your-site/html` | Audit docs for path examples and standardize | DONE | TBD (this PR) |
-| 02 | Clarify domain examples are placeholders | docs/README.md | Domain examples are inconsistent | All domain examples use `abc.yourdomain.com` | Update examples and add a short note | DONE | TBD (this PR) |
-| 03 | Add explicit backup prerequisites | docs/backup.md | Backup steps assume tools are installed | Prerequisites list required tools | Add a short prerequisites section | DONE | (this PR) |
-| 04 | Consolidate service restart instructions | docs/README.md | Restart steps vary by section | Single canonical restart guidance | Create a shared snippet and reference it | DONE | TBD (this PR) |
-| 05 | Explain required file permissions | docs/permissions.md | Permissions guidance is scattered | Clear ownership/permissions table | Add a concise permissions table | DONE | TBD (this PR) |
-| 06 | Document configuration file locations | docs/config.md | Config file locations are unclear | Exact locations with placeholders | Add a table of config paths | DONE | TBD (this PR) |
-| 07 | Add troubleshooting entry for common startup failure | docs/troubleshooting.md | Missing startup failure guidance | Common causes + fixes listed | Add a new troubleshooting item | DONE | TBD (this PR) |
-| 08 | Summarize log locations | docs/logging.md | Log paths are not centralized | Single list of log locations | Add a logging locations section | DONE | TBD (this PR) |
-| 09 | Describe required environment variables | docs/config.md | Env var usage is implicit | Explicit list and purpose | Add env var list with examples | DONE | TBD (this PR) |
-| 10 | Clarify upgrade workflow steps | docs/upgrade.md | Upgrade steps are ambiguous | Step-by-step upgrade flow | Rewrite upgrade section for clarity | DONE | TBD (this PR) |
-| 11 | Note supported OS prerequisites | docs/README.md | OS requirements not explicit | Clear supported OS list | Add a supported OS section | DONE | TBD (this PR) |
-| 12 | Add glossary for key terms | docs/glossary.md | No shared terminology | Quick glossary of key terms | Create glossary file and link it | TODO | TBD |
+| 01 | Document default install paths with placeholders | docs/README.md | Paths are inconsistent across docs | Paths use placeholders like `/var/www/your-site/html` | Audit docs for path examples and standardize | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/138 |
+| 02 | Clarify domain examples are placeholders | docs/README.md | Domain examples are inconsistent | All domain examples use `abc.yourdomain.com` | Update examples and add a short note | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/139 |
+| 03 | Add explicit backup prerequisites | docs/backup.md | Backup steps assume tools are installed | Prerequisites list required tools | Add a short prerequisites section | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/140 |
+| 04 | Consolidate service restart instructions | docs/README.md | Restart steps vary by section | Single canonical restart guidance | Create a shared snippet and reference it | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/141 |
+| 05 | Explain required file permissions | docs/permissions.md | Permissions guidance is scattered | Clear ownership/permissions table | Add a concise permissions table | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/142 |
+| 06 | Document configuration file locations | docs/config.md | Config file locations are unclear | Exact locations with placeholders | Add a table of config paths | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/143 |
+| 07 | Add troubleshooting entry for common startup failure | docs/troubleshooting.md | Missing startup failure guidance | Common causes + fixes listed | Add a new troubleshooting item | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/144 |
+| 08 | Summarize log locations | docs/logging.md | Log paths are not centralized | Single list of log locations | Add a logging locations section | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/145 |
+| 09 | Describe required environment variables | docs/config.md | Env var usage is implicit | Explicit list and purpose | Add env var list with examples | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/146 |
+| 10 | Clarify upgrade workflow steps | docs/upgrade.md | Upgrade steps are ambiguous | Step-by-step upgrade flow | Rewrite upgrade section for clarity | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/147 |
+| 11 | Note supported OS prerequisites | docs/README.md | OS requirements not explicit | Clear supported OS list | Add a supported OS section | DONE | https://github.com/Hello-Pork-Belly/hz-oneclick/pull/148 |
+| 12 | Add glossary for key terms | docs/glossary.md | No shared terminology | Quick glossary of key terms | Create glossary file and link it | DONE | TBD (this PR) |

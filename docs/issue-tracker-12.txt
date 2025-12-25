@@ -1,12 +1,12 @@
-01 [TODO] Document default install paths with placeholders
-02 [TODO] Clarify domain examples are placeholders
-03 [TODO] Add explicit backup prerequisites
-04 [DONE] Consolidate service restart instructions
-05 [DONE] Explain required file permissions
-06 [DONE] Document configuration file locations
-07 [DONE] Add troubleshooting entry for common startup failure
-08 [DONE] Summarize log locations
-09 [DONE] Describe required environment variables
-10 [DONE] Clarify upgrade workflow steps
-11 [DONE] Note supported OS prerequisites - PR: TBD (this PR)
-12 [TODO] Add glossary for key terms
+01 [DONE] Document default install paths with placeholders - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/138
+02 [DONE] Clarify domain examples are placeholders - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/139
+03 [DONE] Add explicit backup prerequisites - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/140
+04 [DONE] Consolidate service restart instructions - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/141
+05 [DONE] Explain required file permissions - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/142
+06 [DONE] Document configuration file locations - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/143
+07 [DONE] Add troubleshooting entry for common startup failure - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/144
+08 [DONE] Summarize log locations - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/145
+09 [DONE] Describe required environment variables - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/146
+10 [DONE] Clarify upgrade workflow steps - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/147
+11 [DONE] Note supported OS prerequisites - PR: https://github.com/Hello-Pork-Belly/hz-oneclick/pull/148
+12 [DONE] Add glossary for key terms - PR: TBD (this PR)
