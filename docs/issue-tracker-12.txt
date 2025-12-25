@@ -5,7 +5,7 @@
 05 [DONE] Explain required file permissions
 06 [DONE] Document configuration file locations
 07 [DONE] Add troubleshooting entry for common startup failure
-08 [TODO] Summarize log locations
+08 [DONE] Summarize log locations
 09 [TODO] Describe required environment variables
 10 [TODO] Clarify upgrade workflow steps
 11 [TODO] Note supported OS prerequisites
