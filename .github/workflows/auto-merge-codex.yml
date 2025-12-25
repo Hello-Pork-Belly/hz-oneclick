@@ -68,6 +68,18 @@ jobs:
               return hasCodexLabel(pr) || isCodexBranch || isCodexAuthor(pr);
             }
 
+            function isCodexBranch(pr) {
+              return pr.head?.ref?.startsWith(codexBranchPrefix);
+            }
+
+            function shouldAutoLabel(pr) {
+              return (
+                context.eventName === "pull_request" &&
+                isCodexAuthor(pr) &&
+                isCodexBranch(pr)
+              );
+            }
+
             function shouldDeleteHeadRef(pr) {
               const isCodexBranch = pr.head?.ref?.startsWith(codexBranchPrefix);
               return isCodexBranch && (hasCodexLabel(pr) || isCodexAuthor(pr));
@@ -165,7 +177,9 @@ jobs:
               return;
             }
 
-            await ensureCodexLabel(pr);
+            if (shouldAutoLabel(pr)) {
+              await ensureCodexLabel(pr);
+            }
 
             if (pr.merged || pr.merged_at) {
               await deleteHeadRef(pr);
