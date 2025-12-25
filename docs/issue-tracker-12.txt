@@ -7,6 +7,6 @@
 07 [DONE] Add troubleshooting entry for common startup failure
 08 [DONE] Summarize log locations
 09 [DONE] Describe required environment variables
-10 [TODO] Clarify upgrade workflow steps
+10 [DONE] Clarify upgrade workflow steps
 11 [TODO] Note supported OS prerequisites
 12 [TODO] Add glossary for key terms

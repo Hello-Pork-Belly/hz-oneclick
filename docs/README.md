@@ -30,6 +30,11 @@ files and common paths with placeholders.
 See [Troubleshooting](troubleshooting.md) for common startup failure checks and
 fixes.
 
+## Upgrade
+
+See [Upgrades](upgrade.md) for the step-by-step upgrade workflow and rollback
+guidance.
+
 ## Logging locations
 
 See [Logging locations](logging.md) for common log paths and discovery
