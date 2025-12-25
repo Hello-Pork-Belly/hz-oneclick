@@ -52,7 +52,7 @@ CI 与 GitHub Actions/self-hosted runners 仅供维护者与验证使用，公�
 
 ## Baseline Quick Triage
 
-- 直接运行：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh)`（可选语言 en/zh），按提示输入要诊断的域名（示例：`abc.yourdomain.com`）。
+- 直接运行：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh)`（可选语言 en/zh），按提示输入要诊断的域名（示例：`abc.yourdomain.com`）。Replace placeholder domains with your real domain.
 - 终端会输出 `VERDICT:` / `KEY:` / `REPORT:` 行，完整报告会写到 `/tmp/` 目录，文件名带时间戳和域名（示例：`/tmp/hz-baseline-triage-abc.yourdomain.com-20240101-120000.txt`）。
 - 报告内容已脱敏，反馈问题时优先提供 `KEY:` 行以及 `REPORT:` 路径或内容，方便他人复现和定位，无需粘贴整份日志。
 - 需要机器可读的结果时，追加 `--format json`（保持默认的人类可读输出不变）：
@@ -68,7 +68,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/m
   - `REPORT_JSON: <JSON 报告路径>`
 - JSON 与文本报告同样经过脱敏处理，措辞保持供应商中立（以 `abc.yourdomain.com` 等占位符为例）。
 - JSON 输出包含 `schema_version`、`generated_at` 等标准字段，方便脚本或 CI 校验结构。
-- Baseline Diagnostics JSON Schema 存放在 `docs/schema/baseline_diagnostics.schema.json`，CI 也会用它做回归校验（示例命令的域名请继续使用 `example.com`、`abc.yourdomain.com` 等占位符）。
+- Baseline Diagnostics JSON Schema 存放在 `docs/schema/baseline_diagnostics.schema.json`，CI 也会用它做回归校验（示例命令的域名请继续使用 `abc.yourdomain.com`、`123.yourdomain.com` 等占位符）。
 - 需要进一步收敛敏感信息时，可追加 `--redact` 触发可选脱敏模式（域名、IP、邮箱、绝对路径会替换为 `<redacted-domain>`、`<redacted-ip>`、`<redacted-email>`、`<redacted-path>` 等占位符）。
   - 仅用 JSON 输出：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh) --format json`
   - 仅用脱敏输出：`bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/quick-triage.sh) --redact`
@@ -89,5 +89,5 @@ bash hz.sh
 - 也可以直接拉取某个基线分组的封装脚本，例如只跑 DNS/IP 组：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/baseline-dns-ip.sh) "example.com" en
+bash <(curl -fsSL https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main/modules/diagnostics/baseline-dns-ip.sh) "abc.yourdomain.com" en
 ```

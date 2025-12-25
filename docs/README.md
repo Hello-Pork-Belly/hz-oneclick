@@ -3,6 +3,7 @@
 This docs folder provides reference information for the scripts in this repo.
 All example paths use placeholders. Replace them with your own site identifier
 (e.g. `your-site`) and domain name (e.g. `abc.yourdomain.com`).
+Replace placeholder domains with your real domain.
 
 ## Default install paths (placeholders)
 

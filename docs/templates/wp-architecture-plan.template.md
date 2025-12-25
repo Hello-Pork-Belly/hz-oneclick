@@ -9,7 +9,7 @@
 
 🟩 十九、LOMP / LNMP 生产环境落地
 【第十九章里程碑（示例占位）】
-- 🟩 Step19-1: 完成 LOMP / LNMP 生产形态落地与基础硬化的验证与记录（示例环境：`arm-node-1.example.com`、`x86-node-1.example.com`；示例路径：`/var/www/<site>/html`）。
+- 🟩 Step19-1: 完成 LOMP / LNMP 生产形态落地与基础硬化的验证与记录（示例环境：`abc.yourdomain.com`、`123.yourdomain.com`；示例路径：`/var/www/<site>/html`）。
 
 🟩 二十、Baseline Diagnostics 统一基线诊断
 【第二十章里程碑（示例占位）】
@@ -18,7 +18,7 @@
 - 🟩 Step20-3: 提供 DNS/IP 诊断分组，覆盖解析、连通性与地域链路。
 - 🟩 Step20-4: 提供源站 / 防火墙分组，涵盖回源连通性与阻断排查。
 - 🟩 Step20-5: 提供 Proxy/CDN 分组，覆盖常见 30x/40x/50x 以及缓存命中检查。
-- 🟩 Step20-6: 提供 TLS/HTTPS 分组，聚焦证书、协议与加密套件检测（示例证书域名：`example.com`）。
+- 🟩 Step20-6: 提供 TLS/HTTPS 分组，聚焦证书、协议与加密套件检测（示例证书域名：`abc.yourdomain.com`）。
 - 🟩 Step20-7: 将 Proxy/CDN（521/TLS）检查项纳入菜单流程，便于快速选择。
 - 🟩 Step20-8: 将 TLS/CERT（SNI/SAN/链/到期）检查项纳入菜单流程，形成标准化清单。
 - 🟩 Step20-9: 将 WP/App（运行态 + HTTP）检查项纳入菜单流程，覆盖核心运行健康度。
@@ -33,6 +33,6 @@
 - 🟩 Step20-18: 为 Quick Triage 增加 JSON 输出模式，补充机器可读的报告与摘要。
 - 🟩 Step20-19: 扩展 Baseline Diagnostics 的 JSON 输出（菜单/格式透传 + 封装脚本产出 JSON 报告）。
 - 🟩 Step20-20: 稳定 JSON contract 并增加校验（`schema_version` / `generated_at` 等必填字段 + 冒烟校验）。
-- 🟩 Step20-21: 提供 JSON Schema 与 CI 校验（示例路径：`docs/schema/baseline_diagnostics.schema.json`；示例域名：`example.com`）。
+- 🟩 Step20-21: 提供 JSON Schema 与 CI 校验（示例路径：`docs/schema/baseline_diagnostics.schema.json`；示例域名：`abc.yourdomain.com`）。
 
 > 提示：请根据实际环境在私有文档中填写真实主机名、域名、路径等信息。公共仓库仅保留此模板，不应包含任何敏感细节。
