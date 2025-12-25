@@ -20,6 +20,11 @@ reload guidance.
 See [File permissions and ownership](permissions.md) for the canonical
 ownership and permission guidance.
 
+## Configuration files
+
+See [Configuration file locations](config.md) for how to locate active config
+files and common paths with placeholders.
+
 ## Default install paths (placeholders)
 
 | Purpose | Example path | Notes |

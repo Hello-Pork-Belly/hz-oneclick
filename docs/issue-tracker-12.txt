@@ -3,7 +3,7 @@
 03 [TODO] Add explicit backup prerequisites
 04 [DONE] Consolidate service restart instructions
 05 [DONE] Explain required file permissions
-06 [TODO] Document configuration file locations
+06 [DONE] Document configuration file locations
 07 [TODO] Add troubleshooting entry for common startup failure
 08 [TODO] Summarize log locations
 09 [TODO] Describe required environment variables
