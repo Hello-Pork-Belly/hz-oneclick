@@ -2029,6 +2029,269 @@ ensure_wp_https_urls() {
   echo "HTTPS URL 更新: 需要手动设置"
 }
 
+ensure_wp_loopback_and_rest_health() {
+  echo
+  echo -e "${CYAN}Site Health preflight (REST API / loopback)${NC}"
+
+  local doc_root="${DOC_ROOT}"
+  local domain=""
+  if [ -n "${SITE_DOMAIN:-}" ]; then
+    domain="$SITE_DOMAIN"
+  elif [ -n "${PRIMARY_DOMAIN:-}" ]; then
+    domain="$PRIMARY_DOMAIN"
+  elif [ -n "${DOMAIN:-}" ]; then
+    domain="$DOMAIN"
+  fi
+
+  local scheme="https"
+  if [ "${SSL_MODE:-}" = "http-only" ]; then
+    scheme="http"
+  fi
+
+  local php_bin="php"
+  local lsphp_version=""
+  if [ -d /usr/local/lsws ]; then
+    local best_version=0
+    local best_php=""
+    local candidate base ver
+    shopt -s nullglob
+    for candidate in /usr/local/lsws/lsphp*/bin/php; do
+      [ -x "$candidate" ] || continue
+      base="$(basename "$(dirname "$(dirname "$candidate")")")"
+      ver="${base#lsphp}"
+      if echo "$ver" | grep -Eq '^[0-9]+$'; then
+        if [ "$ver" -gt "$best_version" ]; then
+          best_version="$ver"
+          best_php="$candidate"
+        fi
+      fi
+    done
+    shopt -u nullglob
+    if [ -n "$best_php" ]; then
+      php_bin="$best_php"
+      lsphp_version="$best_version"
+    fi
+  fi
+  if [ ! -x "$php_bin" ] && ! command -v "$php_bin" >/dev/null 2>&1; then
+    php_bin="php"
+  fi
+
+  local php_has_curl="unknown"
+  if [ -x "$php_bin" ] || command -v "$php_bin" >/dev/null 2>&1; then
+    if "$php_bin" -m 2>/dev/null | grep -qi '^curl$'; then
+      php_has_curl="yes"
+    else
+      php_has_curl="no"
+    fi
+  fi
+
+  local hints=()
+  local warn=0
+  local rest_ok="unknown"
+  local loop_ok="unknown"
+  local rest_code=""
+  local loop_code=""
+  local rest_error=""
+  local loop_error=""
+  local access_blocked=""
+  local http_alt_ok="no"
+
+  if [ -z "$domain" ]; then
+    log_warn "未检测到域名，跳过 REST/loopback 探测。"
+    echo "  请先设置站点域名再运行检查。"
+  elif ! command -v curl >/dev/null 2>&1; then
+    log_warn "未找到 curl，跳过 REST/loopback 探测。"
+  else
+    local rest_url="${scheme}://${domain}/wp-json/"
+    local loop_url="${scheme}://${domain}/wp-admin/admin-ajax.php"
+    local rest_output loop_output rest_exit loop_exit
+
+    rest_output="$(curl -sSIL --max-time 10 "$rest_url" 2>&1)" || rest_exit=$?
+    rest_exit=${rest_exit:-0}
+    rest_code="$(printf '%s\n' "$rest_output" | awk 'toupper($0) ~ /^HTTP\\// {print $2; exit}')"
+    if [ "$rest_exit" -eq 0 ] && echo "$rest_code" | grep -Eq '^[0-9]+$'; then
+      rest_ok="yes"
+    elif [ -n "$rest_code" ] && echo "$rest_code" | grep -Eq '^[0-9]+$'; then
+      if [ "$rest_code" -ge 200 ] && [ "$rest_code" -lt 500 ]; then
+        rest_ok="yes"
+      else
+        rest_ok="no"
+      fi
+    else
+      rest_ok="no"
+    fi
+    if [ "$rest_ok" = "yes" ]; then
+      log_info "REST probe: ${rest_url} (${rest_code:-ok})"
+    else
+      log_warn "REST probe failed: ${rest_url}"
+      rest_error="$rest_output"
+      warn=1
+    fi
+
+    loop_output="$(curl -sSIL --max-time 10 "$loop_url" 2>&1)" || loop_exit=$?
+    loop_exit=${loop_exit:-0}
+    loop_code="$(printf '%s\n' "$loop_output" | awk 'toupper($0) ~ /^HTTP\\// {print $2; exit}')"
+    if [ "$loop_exit" -eq 0 ] && echo "$loop_code" | grep -Eq '^[0-9]+$'; then
+      loop_ok="yes"
+    elif [ -n "$loop_code" ] && echo "$loop_code" | grep -Eq '^[0-9]+$'; then
+      if [ "$loop_code" -ge 200 ] && [ "$loop_code" -lt 500 ]; then
+        loop_ok="yes"
+      else
+        loop_ok="no"
+      fi
+    else
+      loop_ok="no"
+    fi
+    if [ "$loop_ok" = "yes" ]; then
+      log_info "Loopback probe: ${loop_url} (${loop_code:-ok})"
+    else
+      log_warn "Loopback probe failed: ${loop_url}"
+      loop_error="$loop_output"
+      warn=1
+    fi
+
+    if [ "$scheme" = "https" ] && [ "$rest_ok" = "no" ]; then
+      local http_rest_output http_rest_exit http_rest_code
+      http_rest_output="$(curl -sSIL --max-time 10 "http://${domain}/wp-json/" 2>&1)" || http_rest_exit=$?
+      http_rest_exit=${http_rest_exit:-0}
+      http_rest_code="$(printf '%s\n' "$http_rest_output" | awk 'toupper($0) ~ /^HTTP\\// {print $2; exit}')"
+      if [ "$http_rest_exit" -eq 0 ] && echo "$http_rest_code" | grep -Eq '^[0-9]+$'; then
+        http_alt_ok="yes"
+      fi
+    fi
+  fi
+
+  if [ -n "$rest_code" ] && { [ "$rest_code" = "401" ] || [ "$rest_code" = "403" ]; }; then
+    access_blocked="yes"
+  fi
+  if [ -n "$loop_code" ] && { [ "$loop_code" = "401" ] || [ "$loop_code" = "403" ]; }; then
+    access_blocked="yes"
+  fi
+
+  if [ "$php_has_curl" = "no" ]; then
+    local curl_pkg=""
+    if [ -n "$lsphp_version" ] && echo "$lsphp_version" | grep -Eq '^[0-9]+$'; then
+      curl_pkg="lsphp${lsphp_version}-curl"
+    fi
+    if [ -n "$curl_pkg" ] && command -v apt-get >/dev/null 2>&1; then
+      if apt-get update >/dev/null 2>&1 && apt-get install -y "$curl_pkg" >/dev/null 2>&1; then
+        if "$php_bin" -m 2>/dev/null | grep -qi '^curl$'; then
+          php_has_curl="yes"
+          log_info "已安装 PHP curl 扩展 (${curl_pkg})。"
+        else
+          php_has_curl="no"
+        fi
+      fi
+    fi
+    if [ "$php_has_curl" = "no" ]; then
+      if [ -n "$curl_pkg" ]; then
+        hints+=("PHP curl 扩展缺失。可执行: apt-get update && apt-get install -y ${curl_pkg}")
+      else
+        hints+=("PHP curl 扩展缺失。请安装对应的 lsphp curl 扩展后重试。")
+      fi
+      warn=1
+    fi
+  fi
+
+  if command -v ufw >/dev/null 2>&1; then
+    if ufw status 2>/dev/null | grep -q "Status: active"; then
+      local ufw_missing=""
+      if ! ufw status 2>/dev/null | grep -qE '(^|[[:space:]])80/tcp'; then
+        ufw_missing="yes"
+        if ufw allow 80/tcp >/dev/null 2>&1; then
+          log_info "已在 ufw 放行 80/tcp。"
+        fi
+      fi
+      if ! ufw status 2>/dev/null | grep -qE '(^|[[:space:]])443/tcp'; then
+        ufw_missing="yes"
+        if ufw allow 443/tcp >/dev/null 2>&1; then
+          log_info "已在 ufw 放行 443/tcp。"
+        fi
+      fi
+      if [ -n "$ufw_missing" ]; then
+        hints+=("本机防火墙可能未放行 80/443，请确认已允许入站 80/443。")
+        warn=1
+      fi
+    fi
+  fi
+
+  if [ -n "$domain" ] && { [ "$rest_ok" = "no" ] || [ "$loop_ok" = "no" ]; }; then
+    if [ -z "${SERVER_IPV4:-}" ] && [ -z "${SERVER_IPV6:-}" ]; then
+      _detect_public_ip
+    fi
+    local resolved_ips=""
+    if command -v getent >/dev/null 2>&1; then
+      resolved_ips="$(getent ahosts "$domain" 2>/dev/null | awk '{print $1}' | sort -u)"
+    fi
+    local dns_match=""
+    if [ -n "$resolved_ips" ]; then
+      if [ -n "${SERVER_IPV4:-}" ] && echo "$resolved_ips" | grep -qx "${SERVER_IPV4}"; then
+        dns_match="yes"
+      fi
+      if [ -n "${SERVER_IPV6:-}" ] && echo "$resolved_ips" | grep -qx "${SERVER_IPV6}"; then
+        dns_match="yes"
+      fi
+    fi
+    if [ -z "$dns_match" ]; then
+      hints+=("域名解析可能尚未指向本机，请确认 DNS A/AAAA 记录并等待生效。")
+      warn=1
+    fi
+  fi
+
+  if printf '%s' "$rest_error $loop_error" | grep -qiE 'Could not resolve host|Name or service not known|Temporary failure|No address associated'; then
+    hints+=("域名解析失败或未生效，请确认 DNS 记录并稍后重试。")
+    warn=1
+  fi
+  if printf '%s' "$rest_error $loop_error" | grep -qiE 'Connection refused|Failed to connect|No route to host|timed out'; then
+    hints+=("站点连接失败，请确认 80/443 已对外放通且服务在本机监听。")
+    warn=1
+  fi
+
+  if [ "$scheme" = "https" ] && [ "$http_alt_ok" = "yes" ] && { [ "$rest_ok" = "no" ] || [ "$loop_ok" = "no" ]; }; then
+    hints+=("如已启用 HTTPS，请确认 WordPress URL 为 https。安装器已有现成的 HTTPS URL 对齐步骤可供复查。")
+    warn=1
+  fi
+
+  if [ -n "$access_blocked" ]; then
+    hints+=("检测到访问控制/认证可能阻止 loopback。请临时允许本机到 wp-json 和 admin-ajax 的访问以完成检查。")
+    warn=1
+  fi
+
+  if command -v wp >/dev/null 2>&1; then
+    if wp core is-installed --path="$doc_root" --skip-plugins --skip-themes >/dev/null 2>&1; then
+      local wp_http_output wp_http_exit
+      wp_http_output="$(wp --path="$doc_root" eval '$u = home_url("/wp-json/"); $r = wp_remote_get($u, ["timeout"=>10, "redirection"=>3]); if (is_wp_error($r)) { echo "WPHTTP_ERROR: ".$r->get_error_message()."\n"; exit(2); } $code = wp_remote_retrieve_response_code($r); echo "WPHTTP_CODE: ".$code."\n"; exit($code>=200 && $code<500 ? 0 : 3);' 2>&1)" || wp_http_exit=$?
+      wp_http_exit=${wp_http_exit:-0}
+      if [ "$wp_http_exit" -eq 0 ]; then
+        log_info "WP HTTP API probe: ok"
+      else
+        warn=1
+        log_warn "WP HTTP API probe failed."
+        if echo "$wp_http_output" | grep -q "WPHTTP_ERROR:"; then
+          hints+=("WordPress HTTP API 报错: $(echo "$wp_http_output" | awk -F'WPHTTP_ERROR: ' '/WPHTTP_ERROR: /{print $2; exit}')")
+        fi
+      fi
+    else
+      log_warn "检测到 wp-cli，但 WordPress 未安装，跳过 WP 健康检查。"
+    fi
+  else
+    log_warn "wp-cli not found, skipping WP health probes"
+    echo "  Install: https://wp-cli.org/#installing"
+  fi
+
+  if [ "$warn" -eq 0 ]; then
+    log_info "PASS: Site Health preflight completed."
+  else
+    log_warn "WARN: Site Health preflight detected potential issues."
+    if [ "${#hints[@]}" -gt 0 ]; then
+      echo "Hints:"
+      for hint in "${hints[@]}"; do
+        echo "  - $hint"
+      done
+    fi
+  fi
+}
+
 fix_permissions() {
   # [ANCHOR:SET_PERMISSIONS]
   log_step "修复站点目录权限"
@@ -2327,6 +2590,7 @@ install_frontend_only_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  ensure_wp_loopback_and_rest_health
   print_site_size_limit_summary
 
   if [ "${POST_SUMMARY_SHOWN:-0}" -eq 0 ]; then
@@ -2390,6 +2654,7 @@ install_standard_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  ensure_wp_loopback_and_rest_health
   print_summary
   print_site_size_limit_summary
 
