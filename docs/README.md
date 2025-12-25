@@ -10,6 +10,11 @@ Replace placeholder domains with your real domain.
 See [Backups](backup.md) for prerequisites and safety checks before running any
 backup workflow.
 
+## Service restarts
+
+See [Service restarts and reloads](restarts.md) for the canonical restart and
+reload guidance.
+
 ## Default install paths (placeholders)
 
 | Purpose | Example path | Notes |
