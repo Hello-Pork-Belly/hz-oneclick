@@ -30,6 +30,11 @@ files and common paths with placeholders.
 See [Troubleshooting](troubleshooting.md) for common startup failure checks and
 fixes.
 
+## Logging locations
+
+See [Logging locations](logging.md) for common log paths and discovery
+commands.
+
 ## Default install paths (placeholders)
 
 | Purpose | Example path | Notes |
