@@ -3,7 +3,7 @@
 # Install rkhunter and basic check (English)
 
 set -euo pipefail
-HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick/main}"
 HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
 
 ### helpers ###

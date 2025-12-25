@@ -9,7 +9,7 @@ yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 # 全局语言变量：en / zh
 HZ_LANG=""
 HZ_BASELINE_FORMAT="${HZ_BASELINE_FORMAT:-text}"
-HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick/main}"
 HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
 
 baseline_menu_normalize_format() {

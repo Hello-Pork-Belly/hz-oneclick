@@ -17,7 +17,7 @@
 #       * 对 /var/log/rkhunter.log 做简单截断/轮转（例如保留最近 N 天）
 
 SCRIPT_VERSION="0.1.0"
-HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Fat-Pork-Belly/hz-oneclick/main}"
+HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick/main}"
 HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
 
 # --- 简单输出函数（不依赖 common.sh） ---
