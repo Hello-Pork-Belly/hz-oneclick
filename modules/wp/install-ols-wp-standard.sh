@@ -2029,6 +2029,44 @@ ensure_wp_https_urls() {
   echo "HTTPS URL 更新: 需要手动设置"
 }
 
+ensure_wp_loopback_and_rest_health() {
+  # [ANCHOR:WP_LOOPBACK_REST_HEALTH]
+  local doc_root="${DOC_ROOT:-}"
+
+  if ! command -v wp >/dev/null 2>&1; then
+    log_warn "未找到 wp-cli，跳过 REST/loopback 检查。"
+    return
+  fi
+
+  if [ -z "$doc_root" ] || [ ! -d "$doc_root" ]; then
+    log_warn "未找到站点目录，跳过 REST/loopback 检查。"
+    return
+  fi
+
+  local wp_http_output wp_http_exit wp_http_code
+  wp_http_output="$(
+    wp --path="$doc_root" --allow-root eval "\$u = home_url('/wp-json/'); \$r = wp_remote_get(\$u, ['timeout'=>10, 'redirection'=>3]); if (is_wp_error(\$r)) { echo 'WPHTTP_ERROR: '.\$r->get_error_message().\"\n\"; exit(2); } \$code = wp_remote_retrieve_response_code(\$r); echo 'WPHTTP_CODE: '.\$code.\"\\n\"; exit((\$code>=200 && \$code<400) ? 0 : 3);"
+  )"
+  wp_http_exit=$?
+  wp_http_code="$(printf '%s\n' "$wp_http_output" | awk -F': ' '/WPHTTP_CODE:/ {print $2; exit}')"
+
+  if printf '%s' "$wp_http_output" | grep -q "WPHTTP_ERROR:"; then
+    log_warn "REST/loopback 请求失败：${wp_http_output}"
+    return
+  fi
+
+  if [ "$wp_http_exit" -ne 0 ]; then
+    log_warn "REST/loopback 返回异常：${wp_http_output}"
+    return
+  fi
+
+  if printf '%s' "$wp_http_code" | grep -Eq '^(2|3)[0-9]{2}$'; then
+    log_info "REST/loopback 请求正常：HTTP ${wp_http_code}"
+  else
+    log_warn "REST/loopback 返回异常：HTTP ${wp_http_code:-未知}"
+  fi
+}
+
 fix_permissions() {
   # [ANCHOR:SET_PERMISSIONS]
   log_step "修复站点目录权限"
@@ -2079,6 +2117,10 @@ env_self_check() {
   echo "  2) 确认本机防火墙（如 ufw）已放行 80/443；"
   echo "  3) 确认云厂商安全组 / 防火墙已放行 80/443 到本实例；"
   echo "  4) 如使用 CDN/加速服务，确认其 SSL 模式与源站证书是否匹配。"
+
+  echo
+  log_step "WordPress REST/loopback 自检"
+  ensure_wp_loopback_and_rest_health
 }
 
 configure_ssl() {
@@ -2257,16 +2299,18 @@ print_https_post_install() {
   fi
 
   if [ -n "$domain" ]; then
-    local curl_output curl_exit status_line
-    curl_output="$(curl -sSIk --max-time 5 "https://${domain}" 2>&1)" || curl_exit=$?
-    status_line="$(printf '%s\n' "$curl_output" | awk 'toupper($0) ~ /^HTTP\\// {print; exit}')"
+    local curl_output curl_exit
+    curl_output="$(curl -sS -o /dev/null -w "%{http_code}" --max-time 5 "https://${domain}" 2>&1)" || curl_exit=$?
 
     if [ -n "${curl_exit:-}" ] && [ "$curl_exit" -ne 0 ]; then
       log_warn "HTTPS 访问 ${domain} 失败（curl 退出码: ${curl_exit}）。"
       echo "  - 常见原因：DNS 未生效/未指向本机、代理未开启、边缘证书未生效、源站 443 未开放或源站证书无效。"
       echo "  - 可重试命令：curl -sSIk --max-time 5 \"https://${domain}\""
-    elif [ -n "$status_line" ]; then
-      log_info "HTTPS 访问 ${domain} 返回：${status_line}"
+    elif printf '%s' "$curl_output" | grep -Eq '^(2|3)[0-9]{2}$'; then
+      log_info "HTTPS 访问 ${domain} 正常（HTTP ${curl_output}）。"
+    elif [ -n "$curl_output" ]; then
+      log_warn "HTTPS 访问 ${domain} 返回异常（HTTP ${curl_output}）。"
+      echo "  - 可重试命令：curl -sSIk --max-time 5 \"https://${domain}\""
     else
       log_warn "HTTPS 访问 ${domain} 未获取到状态行。"
       echo "  - 可重试命令：curl -sSIk --max-time 5 \"https://${domain}\""
@@ -2275,11 +2319,16 @@ print_https_post_install() {
     log_warn "未检测到域名，跳过 https 域名检查。"
   fi
 
-  if ! curl -sSIk --max-time 3 -k "https://127.0.0.1" >/dev/null 2>&1; then
-    log_warn "本机 443 未能建立 TLS 连接，可能尚未启用源站 HTTPS。"
+  local local_status local_exit
+  local_status="$(curl -sS -o /dev/null -w "%{http_code}" --max-time 3 -k "https://127.0.0.1" 2>&1)" || local_exit=$?
+  if [ -n "${local_exit:-}" ] && [ "$local_exit" -ne 0 ]; then
+    log_warn "本机 443 未能建立 TLS 连接，可能尚未启用源站 HTTPS（curl 退出码: ${local_exit}）。"
     echo "  - 如需源站 HTTPS，请确认 443 监听、证书路径和防火墙配置。"
+  elif printf '%s' "$local_status" | grep -Eq '^(2|3)[0-9]{2}$'; then
+    log_info "本机 443 TLS 连接正常（https://127.0.0.1，HTTP ${local_status}）。"
   else
-    log_info "本机 443 TLS 连接正常（https://127.0.0.1）。"
+    log_warn "本机 443 TLS 返回异常（https://127.0.0.1，HTTP ${local_status}）。"
+    echo "  - 如需源站 HTTPS，请确认 443 监听、证书路径和防火墙配置。"
   fi
 }
 
