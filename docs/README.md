@@ -15,6 +15,11 @@ backup workflow.
 See [Service restarts and reloads](restarts.md) for the canonical restart and
 reload guidance.
 
+## Permissions
+
+See [File permissions and ownership](permissions.md) for the canonical
+ownership and permission guidance.
+
 ## Default install paths (placeholders)
 
 | Purpose | Example path | Notes |
