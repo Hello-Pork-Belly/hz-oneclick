@@ -1,4 +1,5 @@
 name: Auto-merge Codex PRs
+# smoke-test: auto-merge workflow verification
 
 on:
   pull_request:
