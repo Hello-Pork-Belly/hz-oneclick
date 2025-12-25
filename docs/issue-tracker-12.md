@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | Document default install paths with placeholders | docs/README.md | Paths are inconsistent across docs | Paths use placeholders like `/var/www/your-site/html` | Audit docs for path examples and standardize | DONE | TBD (this PR) |
 | 02 | Clarify domain examples are placeholders | docs/README.md | Domain examples are inconsistent | All domain examples use `abc.yourdomain.com` | Update examples and add a short note | DONE | TBD (this PR) |
-| 03 | Add explicit backup prerequisites | docs/backup.md | Backup steps assume tools are installed | Prerequisites list required tools | Add a short prerequisites section | TODO | TBD |
+| 03 | Add explicit backup prerequisites | docs/backup.md | Backup steps assume tools are installed | Prerequisites list required tools | Add a short prerequisites section | DONE | (this PR) |
 | 04 | Consolidate service restart instructions | docs/README.md | Restart steps vary by section | Single canonical restart guidance | Create a shared snippet and reference it | TODO | TBD |
 | 05 | Explain required file permissions | docs/permissions.md | Permissions guidance is scattered | Clear ownership/permissions table | Add a concise permissions table | TODO | TBD |
 | 06 | Document configuration file locations | docs/config.md | Config file locations are unclear | Exact locations with placeholders | Add a table of config paths | TODO | TBD |

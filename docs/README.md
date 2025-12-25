@@ -5,6 +5,11 @@ All example paths use placeholders. Replace them with your own site identifier
 (e.g. `your-site`) and domain name (e.g. `abc.yourdomain.com`).
 Replace placeholder domains with your real domain.
 
+## Backup
+
+See [Backups](backup.md) for prerequisites and safety checks before running any
+backup workflow.
+
 ## Default install paths (placeholders)
 
 | Purpose | Example path | Notes |
