@@ -1,0 +1,12 @@
+01 [TODO] Document default install paths with placeholders
+02 [TODO] Clarify domain examples are placeholders
+03 [TODO] Add explicit backup prerequisites
+04 [TODO] Consolidate service restart instructions
+05 [TODO] Explain required file permissions
+06 [TODO] Document configuration file locations
+07 [TODO] Add troubleshooting entry for common startup failure
+08 [TODO] Summarize log locations
+09 [TODO] Describe required environment variables
+10 [TODO] Clarify upgrade workflow steps
+11 [TODO] Note supported OS prerequisites
+12 [TODO] Add glossary for key terms
