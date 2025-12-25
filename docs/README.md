@@ -45,6 +45,17 @@ commands.
 See [Environment variables](env.md) for the supported environment variables,
 defaults, and safe setup guidance.
 
+## Supported operating systems
+
+Use one of the supported Linux distributions below before running the install
+and management scripts:
+
+- Ubuntu LTS (64-bit)
+- Debian stable (64-bit)
+
+If you are on another Linux distribution, provision a supported host or VM
+first to avoid compatibility gaps.
+
 ## Default install paths (placeholders)
 
 | Purpose | Example path | Notes |
