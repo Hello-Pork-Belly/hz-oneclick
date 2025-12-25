@@ -14,7 +14,7 @@ on:
       - completed
 
 concurrency:
-  group: auto-merge-codex
+  group: auto-merge-codex-${{ github.event.pull_request.number || github.event.check_suite.id }}
   cancel-in-progress: false
 
 permissions:
@@ -30,17 +30,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const allowedConclusions = new Set(["success", "skipped", "neutral"]);
-            const failConclusions = new Set([
-              "failure",
-              "cancelled",
-              "timed_out",
-              "action_required",
-              "stale",
-            ]);
-
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const codexAuthors = new Set(["chatgpt-codex-connector[bot]"]);
+            const codexLabel = "codex";
+            const codexBranchPrefix = "codex/";
 
             async function fetchPullRequest(prNumber) {
               const { data } = await github.rest.pulls.get({
@@ -60,53 +54,52 @@ jobs:
               return fetchPullRequest(prNumber);
             }
 
-            function isTargetPullRequest(pr) {
-              if (!pr) return false;
-              if (pr.base?.ref !== "main") return false;
-              if (pr.draft) return false;
-              if (pr.head?.repo?.full_name !== pr.base?.repo?.full_name) return false;
-
-              const hasCodexLabel = (pr.labels || []).some(
-                (label) => label.name === "codex"
-              );
-              const isCodexBranch = pr.head?.ref?.startsWith("codex/");
-              return hasCodexLabel || isCodexBranch;
+            function hasCodexLabel(pr) {
+              return (pr.labels || []).some((label) => label.name === codexLabel);
             }
 
-            async function getCheckRuns(pr) {
-              const { data } = await github.rest.checks.listForRef({
-                owner,
-                repo,
-                ref: pr.head.sha,
-                per_page: 100,
-              });
-              return data.check_runs || [];
+            function isCodexPullRequest(pr) {
+              const isCodexBranch = pr.head?.ref?.startsWith(codexBranchPrefix);
+              const isCodexAuthor = codexAuthors.has(pr.user?.login);
+              return hasCodexLabel(pr) || isCodexBranch || isCodexAuthor;
             }
 
-            function summarizeCheckRuns(checkRuns) {
-              let hasInProgress = false;
-              let hasFailure = false;
-
-              for (const run of checkRuns) {
-                if (run.status !== "completed") {
-                  hasInProgress = true;
-                  continue;
-                }
-                if (failConclusions.has(run.conclusion)) {
-                  hasFailure = true;
-                }
+            async function ensureCodexLabel(pr) {
+              if (hasCodexLabel(pr)) {
+                return;
               }
-
-              return { hasInProgress, hasFailure };
-            }
-
-            async function comment(prNumber, body) {
-              await github.rest.issues.createComment({
+              await github.rest.issues.addLabels({
                 owner,
                 repo,
-                issue_number: prNumber,
-                body,
+                issue_number: pr.number,
+                labels: [codexLabel],
               });
+            }
+
+            function logSkip(reason) {
+              core.info(`Skipping: ${reason}.`);
+            }
+
+            async function enableAutoMerge(pr) {
+              await github.graphql(
+                `
+                mutation($pullRequestId: ID!) {
+                  enablePullRequestAutoMerge(
+                    input: { pullRequestId: $pullRequestId, mergeMethod: SQUASH }
+                  ) {
+                    pullRequest {
+                      number
+                      autoMergeRequest {
+                        enabledAt
+                      }
+                    }
+                  }
+                }
+                `,
+                {
+                  pullRequestId: pr.node_id,
+                }
+              );
             }
 
             let pr = null;
@@ -121,65 +114,31 @@ jobs:
               return;
             }
 
-            if (!isTargetPullRequest(pr)) {
-              core.info("Pull request does not match Codex criteria.");
+            if (pr.base?.ref !== "main") {
+              logSkip("base branch is not main");
               return;
             }
 
-            const checkRuns = await getCheckRuns(pr);
-            const { hasInProgress, hasFailure } = summarizeCheckRuns(checkRuns);
-
-            if (hasInProgress) {
-              core.info("Checks still running; skipping merge.");
+            if (pr.draft) {
+              logSkip("pull request is a draft");
               return;
             }
 
-            if (hasFailure) {
-              await comment(
-                pr.number,
-                "Automated merge halted because required checks did not complete successfully."
-              );
+            if (pr.head?.repo?.full_name !== pr.base?.repo?.full_name) {
+              logSkip("pull request is from a fork");
               return;
             }
 
-            const mergeState = pr.mergeable_state;
-            if (mergeState !== "clean") {
-              await comment(
-                pr.number,
-                "Automated merge could not proceed because the pull request is not currently mergeable."
-              );
+            if (!isCodexPullRequest(pr)) {
+              logSkip("pull request is not a Codex PR");
               return;
             }
+
+            await ensureCodexLabel(pr);
 
             try {
-              await github.rest.pulls.merge({
-                owner,
-                repo,
-                pull_number: pr.number,
-                merge_method: "squash",
-              });
-              core.info("Pull request merged.");
+              await enableAutoMerge(pr);
+              core.info("Enabled auto-merge (squash).");
             } catch (error) {
-              await comment(
-                pr.number,
-                "Automated merge could not proceed because the pull request is not currently mergeable."
-              );
-              core.info(`Merge failed: ${error.message}`);
-              return;
-            }
-
-            const headRef = pr.head?.ref;
-            const headRepo = pr.head?.repo?.full_name;
-            const baseRepo = pr.base?.repo?.full_name;
-            if (headRef?.startsWith("codex/") && headRepo === baseRepo) {
-              try {
-                await github.rest.git.deleteRef({
-                  owner,
-                  repo,
-                  ref: `heads/${headRef}`,
-                });
-                core.info(`Deleted branch ${headRef}.`);
-              } catch (error) {
-                core.info(`Branch deletion skipped: ${error.message}`);
-              }
+              core.info(`Auto-merge enablement failed: ${error.message}`);
             }
