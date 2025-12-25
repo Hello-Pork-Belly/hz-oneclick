@@ -17,5 +17,5 @@
 | 08 | Summarize log locations | docs/logging.md | Log paths are not centralized | Single list of log locations | Add a logging locations section | DONE | TBD (this PR) |
 | 09 | Describe required environment variables | docs/config.md | Env var usage is implicit | Explicit list and purpose | Add env var list with examples | DONE | TBD (this PR) |
 | 10 | Clarify upgrade workflow steps | docs/upgrade.md | Upgrade steps are ambiguous | Step-by-step upgrade flow | Rewrite upgrade section for clarity | DONE | TBD (this PR) |
-| 11 | Note supported OS prerequisites | docs/README.md | OS requirements not explicit | Clear supported OS list | Add a supported OS section | TODO | TBD |
+| 11 | Note supported OS prerequisites | docs/README.md | OS requirements not explicit | Clear supported OS list | Add a supported OS section | DONE | TBD (this PR) |
 | 12 | Add glossary for key terms | docs/glossary.md | No shared terminology | Quick glossary of key terms | Create glossary file and link it | TODO | TBD |

@@ -8,5 +8,5 @@
 08 [DONE] Summarize log locations
 09 [DONE] Describe required environment variables
 10 [DONE] Clarify upgrade workflow steps
-11 [TODO] Note supported OS prerequisites
+11 [DONE] Note supported OS prerequisites - PR: TBD (this PR)
 12 [TODO] Add glossary for key terms
