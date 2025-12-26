@@ -2776,6 +2776,263 @@ ensure_wp_loopback_and_rest_health() {
   fi
 }
 
+loopback_hosts_block_present() {
+  local begin_marker="$1"
+  local end_marker="$2"
+
+  [ -f /etc/hosts ] || return 1
+  if grep -qFx "$begin_marker" /etc/hosts && grep -qFx "$end_marker" /etc/hosts; then
+    return 0
+  fi
+
+  return 1
+}
+
+loopback_host_conflict_exists() {
+  local domain="$1"
+  local begin_marker="$2"
+  local end_marker="$3"
+
+  awk -v domain="$domain" -v begin="$begin_marker" -v end="$end_marker" '
+    BEGIN {in_block=0; conflict=0}
+    $0 == begin {in_block=1; next}
+    $0 == end {in_block=0; next}
+    in_block {next}
+    {
+      line=$0
+      sub(/#.*/, "", line)
+      if (line ~ /^[[:space:]]*$/) next
+      n=split(line, fields, /[[:space:]]+/)
+      for (i=2; i<=n; i++) {
+        if (fields[i] == domain) {
+          conflict=1
+          exit
+        }
+      }
+    }
+    END {exit conflict ? 0 : 1}
+  ' /etc/hosts
+}
+
+apply_loopback_hosts_override() {
+  local domain="$1"
+  local www_domain="${2:-}"
+  local begin_marker="# hz-oneclick loopback begin"
+  local end_marker="# hz-oneclick loopback end"
+  local host_lines tmp_file
+
+  if [ -z "$domain" ]; then
+    log_warn "未检测到域名，跳过 hosts 修改。"
+    return 1
+  fi
+
+  if [ ! -f /etc/hosts ]; then
+    log_warn "/etc/hosts 不存在，跳过 hosts 修改。"
+    return 1
+  fi
+
+  if loopback_host_conflict_exists "$domain" "$begin_marker" "$end_marker"; then
+    log_warn "检测到 ${domain} 已在 /etc/hosts 中自定义映射，已跳过自动修改。"
+    return 1
+  fi
+  if [ -n "$www_domain" ] && loopback_host_conflict_exists "$www_domain" "$begin_marker" "$end_marker"; then
+    log_warn "检测到 ${www_domain} 已在 /etc/hosts 中自定义映射，已跳过自动修改。"
+    return 1
+  fi
+
+  host_lines="$(printf "127.0.0.1 %s\n" "$domain")"
+  if [ -n "$www_domain" ]; then
+    host_lines="${host_lines}$(printf "127.0.0.1 %s\n" "$www_domain")"
+  fi
+
+  tmp_file="$(mktemp)"
+
+  if loopback_hosts_block_present "$begin_marker" "$end_marker"; then
+    awk -v begin="$begin_marker" -v end="$end_marker" -v lines="$host_lines" '
+      $0 == begin {
+        print begin
+        printf "%s", lines
+        in_block=1
+        next
+      }
+      $0 == end {
+        in_block=0
+        print end
+        next
+      }
+      !in_block {print}
+    ' /etc/hosts >"$tmp_file"
+  else
+    cat /etc/hosts >"$tmp_file"
+    {
+      echo "$begin_marker"
+      printf "%s" "$host_lines"
+      echo "$end_marker"
+    } >>"$tmp_file"
+  fi
+
+  if ! cmp -s /etc/hosts "$tmp_file"; then
+    cp "$tmp_file" /etc/hosts
+  fi
+
+  rm -f "$tmp_file"
+
+  log_info "已更新 /etc/hosts loopback 映射。"
+  log_info "如需撤销，可删除 /etc/hosts 中以下标记区块："
+  echo "  ${begin_marker}"
+  echo "  ${end_marker}"
+  return 0
+}
+
+run_loopback_preflight() {
+  # [ANCHOR:LOOPBACK_PREFLIGHT]
+  local domain="${SITE_DOMAIN:-}"
+  local doc_root="${DOC_ROOT:-}"
+  local check_failed=0
+  local openssl_exit=0
+  local curl_output curl_exit
+  local www_domain=""
+  local add_www=""
+
+  if [ -z "$domain" ]; then
+    log_warn "未检测到域名，跳过 Loopback/REST API 预检。"
+    return 0
+  fi
+
+  if [ -z "$doc_root" ] || [ ! -d "$doc_root" ]; then
+    log_warn "未找到站点目录，跳过 Loopback/REST API 预检。"
+    return 0
+  fi
+
+  log_step "Loopback/REST API 预检"
+
+  echo "1) 端口监听检查（80/443）"
+  if command -v ss >/dev/null 2>&1; then
+    if ss -lntp | grep -q ":443 "; then
+      log_info "检测到 443 监听。"
+    else
+      log_warn "未检测到 443 监听。"
+      check_failed=1
+    fi
+    if ss -lntp | grep -q ":80 "; then
+      log_info "检测到 80 监听。"
+    else
+      log_warn "未检测到 80 监听。"
+    fi
+  else
+    if netstat -lntp 2>/dev/null | grep -q ":443 "; then
+      log_info "检测到 443 监听。"
+    else
+      log_warn "未检测到 443 监听。"
+      check_failed=1
+    fi
+    if netstat -lntp 2>/dev/null | grep -q ":80 "; then
+      log_info "检测到 80 监听。"
+    else
+      log_warn "未检测到 80 监听。"
+    fi
+  fi
+
+  echo
+  echo "2) 本机 TLS/SNI 握手检查"
+  if command -v openssl >/dev/null 2>&1; then
+    openssl s_client -connect 127.0.0.1:443 -servername "$domain" -brief </dev/null >/dev/null 2>&1
+    openssl_exit=$?
+    if [ "$openssl_exit" -eq 0 ]; then
+      log_info "TLS/SNI 握手成功。"
+    else
+      log_warn "TLS/SNI 握手失败。"
+      check_failed=1
+    fi
+  else
+    log_warn "未找到 openssl，跳过 TLS/SNI 检查。"
+  fi
+
+  echo
+  echo "3) 本机 HTTPS 回环请求检查（Host/SNI）"
+  if command -v curl >/dev/null 2>&1; then
+    curl_exit=0
+    curl_output="$(curl -kfsSIL --resolve "${domain}:443:127.0.0.1" "https://${domain}/" 2>&1)" || curl_exit=$?
+    if [ "${curl_exit:-0}" -eq 0 ]; then
+      log_info "HTTPS 回环请求成功。"
+    else
+      log_warn "HTTPS 回环请求失败：${curl_output}"
+      check_failed=1
+    fi
+  else
+    log_warn "未找到 curl，跳过 HTTPS 回环检查。"
+  fi
+
+  if [ -f "${doc_root}/wp-config.php" ] || [ -f "${doc_root}/wp-settings.php" ]; then
+    echo
+    echo "4) WordPress REST API 回环检查"
+    if command -v curl >/dev/null 2>&1; then
+      curl_exit=0
+      curl_output="$(curl -kfsS --resolve "${domain}:443:127.0.0.1" "https://${domain}/wp-json/" 2>&1)" || curl_exit=$?
+      if [ "${curl_exit:-0}" -eq 0 ]; then
+        log_info "wp-json 回环请求成功。"
+      else
+        log_warn "wp-json 回环请求失败：${curl_output}"
+        check_failed=1
+      fi
+    else
+      log_warn "未找到 curl，跳过 wp-json 回环检查。"
+    fi
+  fi
+
+  if [ "$check_failed" -ne 0 ]; then
+    log_warn "Local HTTPS loopback check failed; WordPress REST/loopback may report critical issues."
+  fi
+
+  if [ "$check_failed" -eq 0 ]; then
+    return 0
+  fi
+
+  echo
+  log_warn "部分环境无法从服务器自身稳定访问 HTTPS 域名，这会导致 REST API/loopback 检查报错。"
+  echo "  1) 应用本地 hosts loopback 修复（推荐）"
+  echo "  2) 跳过（仅提供手动指引）"
+  echo
+  read -rp "请选择 [1-2，默认 2]: " loopback_choice
+  loopback_choice="${loopback_choice:-2}"
+
+  case "$loopback_choice" in
+    1)
+      if [[ "$domain" != www.* ]]; then
+        read -rp "是否同时映射 www.${domain}？[y/N]: " add_www
+        add_www="${add_www:-N}"
+        if [[ "$add_www" =~ ^[Yy]$ ]]; then
+          www_domain="www.${domain}"
+        fi
+      fi
+      if apply_loopback_hosts_override "$domain" "$www_domain"; then
+        echo
+        echo "5) 修复后回环复检（curl --resolve）"
+        curl_exit=0
+        curl_output="$(curl -kfsSIL --resolve "${domain}:443:127.0.0.1" "https://${domain}/" 2>&1)" || curl_exit=$?
+        if [ "${curl_exit:-0}" -eq 0 ]; then
+          log_info "Loopback 修复复检通过。"
+        else
+          log_warn "Loopback 修复复检失败：${curl_output}"
+        fi
+      else
+        log_warn "hosts 更新未完成，已跳过复检。"
+      fi
+      ;;
+    *)
+      echo "手动指引："
+      echo "  1) 在 /etc/hosts 添加以下区块："
+      echo "     # hz-oneclick loopback begin"
+      echo "     127.0.0.1 ${domain}"
+      if [[ "$domain" != www.* ]]; then
+        echo "     127.0.0.1 www.${domain}  (如你使用 www 域名)"
+      fi
+      echo "     # hz-oneclick loopback end"
+      echo "  2) 重新执行：curl -kfsSIL --resolve \"${domain}:443:127.0.0.1\" \"https://${domain}/\""
+      ;;
+  esac
+}
+
 fix_permissions() {
   # [ANCHOR:SET_PERMISSIONS]
   log_step "修复站点目录权限"
@@ -3136,6 +3393,7 @@ install_frontend_only_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  run_loopback_preflight
   print_summary
   print_site_size_limit_summary
 
@@ -3201,6 +3459,7 @@ install_standard_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  run_loopback_preflight
   print_summary
   print_site_size_limit_summary
 
@@ -3498,6 +3757,7 @@ install_hub_flow() {
   fix_permissions
   env_self_check
   configure_ssl
+  run_loopback_preflight
   print_summary
   print_hub_summary
   print_site_size_limit_summary

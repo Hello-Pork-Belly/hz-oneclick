@@ -6,6 +6,9 @@
 - **脚本语法**：对关键脚本执行 `bash -n`，至少覆盖 `modules/wp` 的标准 WP 安装脚本，按需补充入口脚本（如 `hz.sh`）。
 - **静态扫描**：运行 `shellcheck`（需启用 `-x` 以跟踪引用）覆盖与改动相关的脚本。
 - **禁止词校验**：在脚本的用户输出（`echo` / `printf` 文案）中 grep，确保不含具体云厂商名称；提示关于解析、端口、入站/出站规则需保持中性描述。
+- **Loopback 预检**：确认标准 WP 安装脚本包含本机 HTTPS loopback/REST API 预检，且使用 `openssl s_client` + `curl --resolve` 进行 SNI/回环检查。
+- **Loopback hosts 标记**：使用 `rg` 确认脚本中存在 `# hz-oneclick loopback begin` / `# hz-oneclick loopback end` 标记字符串。
+- **中性输出**：新增/调整的 loopback/hosts 修复提示保持中性描述，不出现云厂商名称。
 - **菜单标识**：进入中英文菜单确认展示 Version/Build 与 Source/Base URL 行，确保与本次构建一致。
 - **DB Grant 源地址**：使用 `rg` 确认脚本中不存在硬编码的 DB 用户来源 IP/Host（例如 `100.x.x.x`）。
 
