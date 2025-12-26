@@ -1590,6 +1590,16 @@ test_db_connection() {
   fi
   DB_PORT="$port"
 
+  if ! is_ip_address "$host"; then
+    log_info "DNS 解析检测: ${host}"
+    if ! getent hosts "$host" >/dev/null 2>&1; then
+      log_error "DNS 解析失败：${host}"
+      log_warn "可能原因：域名未解析、解析记录未生效、或本机 DNS 无法访问。"
+      log_warn "建议检查：域名解析是否指向正确内网/隧道出口、以及本机 /etc/resolv.conf。"
+      return 1
+    fi
+  fi
+
   log_info "TCP 连通性检测: ${host}:${port}"
   if ! tcp_err="$(timeout 3 bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" 2>&1 >/dev/null)"; then
     log_error "无法连接到 ${host}:${port}（TCP 不可达）。"
@@ -1621,6 +1631,271 @@ test_db_connection() {
     [ -n "$mysql_err" ] && log_warn "系统提示: ${mysql_err}"
   fi
   return 1
+}
+
+is_ip_address() {
+  local host="${1:-}"
+
+  if echo "$host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+    return 0
+  fi
+
+  if echo "$host" | grep -qiE '^[0-9a-f:]+$'; then
+    return 0
+  fi
+
+  return 1
+}
+
+prompt_db_info_lite() {
+  # [ANCHOR:DB_INFO_PROMPT_LITE]
+  echo
+  echo "================ LOMP-Lite（Frontend-only）：外部数据库配置 ================"
+  echo "请先在目标 MariaDB/MySQL 实例中『手动』创建好："
+  echo "  - 独立数据库，例如: ${SITE_SLUG}_wp"
+  echo "  - 独立数据库用户，例如: ${SITE_SLUG}_user，并分配该库全部权限"
+  echo
+
+  while :; do
+    read -rp "DB Host（例如: 100.x.x.x 或 db.yourdomain.com）: " DB_HOST
+    [ -n "$DB_HOST" ] && break
+    log_warn "DB Host 不能为空。"
+  done
+
+  while :; do
+    read -rp "DB Port [3306]: " DB_PORT
+    DB_PORT="${DB_PORT:-3306}"
+    if [[ "$DB_PORT" =~ ^[0-9]+$ ]]; then
+      break
+    fi
+    log_warn "DB 端口必须为数字。"
+  done
+
+  while :; do
+    read -rp "DB 名称（必须与已创建数据库名称完全一致，例如: ${SITE_SLUG}_wp）: " DB_NAME
+    [ -n "$DB_NAME" ] && break
+    log_warn "DB 名称不能为空。"
+  done
+
+  while :; do
+    read -rp "DB 用户名（必须与已创建的数据库用户一致，例如: ${SITE_SLUG}_user）: " DB_USER
+    [ -n "$DB_USER" ] && break
+    log_warn "DB 用户名不能为空。"
+  done
+
+  while :; do
+    read -rsp "DB 密码（不会回显，请确保与该 DB 用户的真实密码一致）: " DB_PASSWORD
+    echo
+    if [ -z "$DB_PASSWORD" ]; then
+      log_warn "DB 密码不能为空。"
+      continue
+    fi
+
+    read -rsp "请再次输入 DB 密码进行确认: " DB_PASSWORD_CONFIRM
+    echo
+    if [ "$DB_PASSWORD" != "$DB_PASSWORD_CONFIRM" ]; then
+      log_error "两次输入的 DB 密码不一致，请重新输入。"
+      continue
+    fi
+
+    unset DB_PASSWORD_CONFIRM
+    break
+  done
+}
+
+prompt_redis_info_lite() {
+  # [ANCHOR:REDIS_INFO_PROMPT_LITE]
+  local choice
+
+  REDIS_ENABLED="no"
+  REDIS_HOST=""
+  REDIS_PORT=""
+  REDIS_PASSWORD=""
+
+  read -rp "是否配置 Redis 对象缓存？[y/N]: " choice
+  choice="${choice:-N}"
+  if ! [[ "$choice" =~ ^[Yy] ]]; then
+    return
+  fi
+
+  REDIS_ENABLED="yes"
+
+  while :; do
+    read -rp "Redis Host（例如: 100.x.x.x 或 redis.yourdomain.com）: " REDIS_HOST
+    [ -n "$REDIS_HOST" ] && break
+    log_warn "Redis Host 不能为空。"
+  done
+
+  while :; do
+    read -rp "Redis Port [6379]: " REDIS_PORT
+    REDIS_PORT="${REDIS_PORT:-6379}"
+    if [[ "$REDIS_PORT" =~ ^[0-9]+$ ]]; then
+      break
+    fi
+    log_warn "Redis 端口必须为数字。"
+  done
+
+  read -rsp "Redis 密码（可留空）: " REDIS_PASSWORD
+  echo
+}
+
+test_redis_connection_lite() {
+  # [ANCHOR:REDIS_CONN_TEST_LITE]
+  log_step "测试 Redis 连通性"
+
+  local host="$REDIS_HOST"
+  local port="${REDIS_PORT:-6379}"
+  local tcp_err=""
+  local ping_err=""
+
+  if [ -z "$host" ]; then
+    log_error "Redis Host 不能为空。"
+    return 1
+  fi
+  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+    log_error "Redis 端口必须为数字（当前: ${port}）。"
+    return 1
+  fi
+
+  if ! is_ip_address "$host"; then
+    log_info "DNS 解析检测: ${host}"
+    if ! getent hosts "$host" >/dev/null 2>&1; then
+      log_error "DNS 解析失败：${host}"
+      log_warn "可能原因：域名未解析、解析记录未生效、或本机 DNS 无法访问。"
+      log_warn "建议检查：域名解析是否指向正确内网/隧道出口、以及本机 /etc/resolv.conf。"
+      return 1
+    fi
+  fi
+
+  log_info "TCP 连通性检测: ${host}:${port}"
+  if ! tcp_err="$(timeout 3 bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" 2>&1 >/dev/null)"; then
+    log_error "无法连接到 ${host}:${port}（TCP 不可达）。"
+    log_warn "可能原因：防火墙/安全组未放行端口、服务未监听、内网或隧道未连接、地址填写错误。"
+    [ -n "$tcp_err" ] && log_warn "系统提示: ${tcp_err}"
+    return 1
+  fi
+
+  if ! command -v redis-cli >/dev/null 2>&1; then
+    log_warn "未找到 redis-cli，无法执行 PING 认证检查。"
+    log_warn "可安装 redis-tools 或 redis-cli 后重试。"
+    return 0
+  fi
+
+  if [ -n "$REDIS_PASSWORD" ]; then
+    ping_err="$(redis-cli -h "$host" -p "$port" -a "$REDIS_PASSWORD" PING 2>&1 || true)"
+  else
+    ping_err="$(redis-cli -h "$host" -p "$port" PING 2>&1 || true)"
+  fi
+
+  if echo "$ping_err" | grep -qi "PONG"; then
+    log_info "Redis PING 成功：${host}:${port}"
+    return 0
+  fi
+
+  log_error "Redis PING 失败：${host}:${port}"
+  if echo "$ping_err" | grep -qi "NOAUTH"; then
+    log_warn "可能原因：Redis 密码错误或未授权。"
+  elif echo "$ping_err" | grep -qi "Connection refused"; then
+    log_warn "可能原因：端口未放行/服务未启动/绑定地址限制。"
+  else
+    [ -n "$ping_err" ] && log_warn "系统提示: ${ping_err}"
+  fi
+  return 1
+}
+
+print_lite_preflight_summary() {
+  # [ANCHOR:LITE_PREFLIGHT_SUMMARY]
+  local redis_status="未启用"
+  local redis_pass_status="未设置"
+
+  if [ "${REDIS_ENABLED:-no}" = "yes" ]; then
+    redis_status="${REDIS_HOST}:${REDIS_PORT}"
+    if [ -n "$REDIS_PASSWORD" ]; then
+      redis_pass_status="已设置"
+    fi
+  fi
+
+  echo
+  echo -e "${CYAN}==== LOMP-Lite (Frontend-only): external DB/Redis ====${NC}"
+  echo "数据库主机:  ${DB_HOST}:${DB_PORT}"
+  echo "数据库名称:  ${DB_NAME}"
+  echo "数据库用户:  ${DB_USER}"
+  echo "数据库密码:  已设置（已隐藏）"
+  echo "Redis 配置:  ${redis_status}"
+  if [ "${REDIS_ENABLED:-no}" = "yes" ]; then
+    echo "Redis 密码:  ${redis_pass_status}"
+  fi
+  echo
+}
+
+get_wp_db_host_value() {
+  local host="${DB_HOST:-}"
+  local port="${DB_PORT:-3306}"
+
+  if [[ "$host" == *:* ]]; then
+    printf "%s" "$host"
+    return 0
+  fi
+
+  if [ -n "$port" ] && [ "$port" != "3306" ]; then
+    printf "%s:%s" "$host" "$port"
+    return 0
+  fi
+
+  printf "%s" "$host"
+}
+
+update_wp_config_define() {
+  local wp_config="$1"
+  local key="$2"
+  local value="$3"
+  local mode="${4:-string}"
+  local line="$value"
+  local tmp
+
+  if [ "$mode" = "string" ]; then
+    line="${value//\\/\\\\}"
+    line="${line//\'/\\\'}"
+    line="define('${key}', '${line}');"
+  else
+    line="define('${key}', ${value});"
+  fi
+
+  if grep -q "define([\"']${key}[\"']" "$wp_config"; then
+    tmp="${wp_config}.tmp"
+    awk -v key="$key" -v newline="$line" '
+      $0 ~ "define\\([\"\\047]" key "[\"\\047]" { print newline; next }
+      { print }
+    ' "$wp_config" >"$tmp" && mv "$tmp" "$wp_config"
+  else
+    tmp="${wp_config}.tmp"
+    awk -v newline="$line" '
+      NR==1 { print; print newline; next }
+      { print }
+    ' "$wp_config" >"$tmp" && mv "$tmp" "$wp_config"
+  fi
+}
+
+ensure_wp_redis_config() {
+  # [ANCHOR:WP_REDIS_CONFIG]
+  if [ "${REDIS_ENABLED:-no}" != "yes" ]; then
+    return
+  fi
+
+  local wp_config="${DOC_ROOT}/wp-config.php"
+  if [ ! -f "$wp_config" ]; then
+    log_warn "未找到 ${wp_config}，无法写入 Redis 配置。"
+    return
+  fi
+
+  update_wp_config_define "$wp_config" "WP_CACHE" "true" "raw"
+  update_wp_config_define "$wp_config" "WP_REDIS_HOST" "$REDIS_HOST" "string"
+  update_wp_config_define "$wp_config" "WP_REDIS_PORT" "$REDIS_PORT" "raw"
+  if [ -n "$REDIS_PASSWORD" ]; then
+    update_wp_config_define "$wp_config" "WP_REDIS_PASSWORD" "$REDIS_PASSWORD" "string"
+  fi
+
+  log_info "已写入 wp-config.php Redis 连接信息（WP_REDIS_*）。"
 }
 
 install_packages() {
@@ -1925,10 +2200,13 @@ generate_wp_config() {
   esc_db_password=${esc_db_password//\\/\\\\}
   esc_db_password=${esc_db_password//&/\\&}
 
+  local db_host_value
+  db_host_value="$(get_wp_db_host_value)"
+
   sed -i "s|database_name_here|${DB_NAME}|" "$wp_config"
   sed -i "s|username_here|${DB_USER}|" "$wp_config"
   sed -i "s|password_here|${esc_db_password}|" "$wp_config"
-  sed -i "s|localhost|${DB_HOST}|" "$wp_config"
+  sed -i "s|localhost|${db_host_value}|" "$wp_config"
 
   log_info "已根据输入生成 wp-config.php（DB_* 信息已写入）。"
 }
@@ -2365,17 +2643,65 @@ install_frontend_only_flow() {
 
   require_root
   check_os
+  log_step "LOMP-Lite (Frontend-only): external DB/Redis"
   prompt_site_info
+
+  while :; do
+    prompt_db_info_lite
+    if test_db_connection; then
+      break
+    fi
+
+    echo "-------------------------------------"
+    echo "  1) 重新输入数据库信息"
+    echo "  0) 退出脚本"
+    echo "-------------------------------------"
+    read -rp "请输入选项 [0-1]: " opt
+    case "$opt" in
+      1) ;;
+      0) log_info "已退出脚本。"; exit 1 ;;
+      *) log_warn "输入无效，将默认重新输入数据库信息。" ;;
+    esac
+  done
+
+  while :; do
+    prompt_redis_info_lite
+    if [ "${REDIS_ENABLED:-no}" != "yes" ]; then
+      break
+    fi
+
+    if test_redis_connection_lite; then
+      break
+    fi
+
+    echo "-------------------------------------"
+    echo "  1) 重新输入 Redis 信息"
+    echo "  2) 跳过 Redis 配置"
+    echo "  0) 退出脚本"
+    echo "-------------------------------------"
+    read -rp "请输入选项 [0-2]: " opt
+    case "$opt" in
+      1) ;;
+      2) REDIS_ENABLED="no"; REDIS_HOST=""; REDIS_PORT=""; REDIS_PASSWORD=""; break ;;
+      0) log_info "已退出脚本。"; exit 1 ;;
+      *) log_warn "输入无效，将默认重新输入 Redis 信息。" ;;
+    esac
+  done
+
+  print_lite_preflight_summary
 
   install_packages
   setup_vhost_config
   download_wordpress
   prompt_site_size_limit
   setup_site_size_limit_monitor
+  generate_wp_config
+  ensure_wp_redis_config
   fix_permissions
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  print_summary
   print_site_size_limit_summary
 
   if [ "${POST_SUMMARY_SHOWN:-0}" -eq 0 ]; then
