@@ -383,7 +383,7 @@ main_menu() {
           baseline_diagnostics_menu
           ;;
         13)
-          echo "将安装OLS+WP （ DB/Redis ）..."
+          echo "将安装 LOMP/LNMP（DB / Redis 配置）..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/install-ols-wp-standard.sh")
           ;;
         0)
