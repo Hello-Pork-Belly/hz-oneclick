@@ -1670,10 +1670,15 @@ test_db_connection() {
     return 0
   fi
 
+  if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ] && [ -n "$db_client" ]; then
+    LITE_DB_CLIENT="$db_client"
+  fi
+
   if mysql_err="$( { "$db_client" -h "$host" -P "$port" -u "$DB_USER" "-p$DB_PASSWORD" -e "SELECT 1;" >/dev/null; } 2>&1 )"; then
     log_info "认证通过：${DB_USER}@${host}:${port}"
     if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
       LITE_DB_AUTH_STATUS="PASS"
+      diagnose_lite_db_grants_host_mismatch "$db_client" "$host" "$port" || true
     fi
     return 0
   fi
@@ -1712,6 +1717,130 @@ is_ip_address() {
   fi
 
   return 1
+}
+
+diagnose_lite_db_grants_host_mismatch() {
+  # [ANCHOR:LITE_DB_GRANTS_DIAG]
+  local db_client="$1"
+  local host="$2"
+  local port="$3"
+  local whoami hosts host_entry grants_output grants_err client_info client_user current_user client_host current_host
+
+  if [ -z "$db_client" ]; then
+    return 0
+  fi
+
+  client_info="$("$db_client" -h "$host" -P "$port" -u "$DB_USER" "-p$DB_PASSWORD" -N -s \
+    -e "SELECT USER(), CURRENT_USER();" 2>/dev/null)" || true
+  if [ -z "$client_info" ]; then
+    return 0
+  fi
+
+  client_user="${client_info%%$'\t'*}"
+  current_user="${client_info#*$'\t'}"
+  client_host="${client_user#*@}"
+  current_host="${current_user#*@}"
+
+  if grants_err="$( { "$db_client" -h "$host" -P "$port" -u "$DB_USER" "-p$DB_PASSWORD" \
+    -e "SHOW GRANTS FOR '${DB_USER}'@'${client_host}';" >/dev/null; } 2>&1 )"; then
+    return 0
+  fi
+
+  if ! echo "$grants_err" | grep -qi "There is no such grant\|not allowed"; then
+    return 0
+  fi
+
+  hosts="$("$db_client" -h "$host" -P "$port" -u "$DB_USER" "-p$DB_PASSWORD" -N -s \
+    -e "SELECT Host FROM mysql.user WHERE User='${DB_USER}' ORDER BY LENGTH(Host), Host;" 2>/dev/null)" || true
+
+  if [ -z "$hosts" ]; then
+    log_warn "未能读取 mysql.user 中的 Host 列表（可能缺少权限），请在 DB 主机上使用管理员账号排查。"
+    log_warn "提示：SHOW GRANTS FOR '${DB_USER}'@'${client_host}' 报错并不一定代表账号不存在。"
+    return 0
+  fi
+
+  log_warn "检测到 DB 用户 ${DB_USER} 在以下 Host 规则中存在："
+  while read -r whoami; do
+    [ -n "$whoami" ] && echo "  - ${DB_USER}@${whoami}"
+  done <<<"$hosts"
+
+  if echo "$hosts" | grep -qx "$current_host"; then
+    host_entry="$current_host"
+  elif echo "$hosts" | grep -qx "%"; then
+    host_entry="%"
+  else
+    host_entry="$(printf '%s\n' "$hosts" | head -n1)"
+  fi
+
+  log_warn "说明：你的 DB 用户实际定义为 '${DB_USER}'@'${host_entry}'，因此对 '${DB_USER}'@'${client_host}' 执行 SHOW GRANTS 失败是预期行为。"
+
+  grants_output="$("$db_client" -h "$host" -P "$port" -u "$DB_USER" "-p$DB_PASSWORD" -N -s \
+    -e "SHOW GRANTS FOR '${DB_USER}'@'${host_entry}';" 2>/dev/null)" || true
+
+  if [ -n "$grants_output" ]; then
+    echo "匹配到的 GRANTS（${DB_USER}@${host_entry}）："
+    printf '%s\n' "$grants_output" | sed 's/^/  /'
+  else
+    log_warn "未能读取 '${DB_USER}'@'${host_entry}' 的 GRANTS（可能缺少权限）。"
+  fi
+
+  return 0
+}
+
+warn_lite_db_non_empty() {
+  # [ANCHOR:LITE_DB_READINESS]
+  local db_client="${1:-}"
+  local table_count=""
+  local prompt_choice=""
+
+  if [ -z "$db_client" ]; then
+    if command -v mysql >/dev/null 2>&1; then
+      db_client="mysql"
+    elif command -v mariadb >/dev/null 2>&1; then
+      db_client="mariadb"
+    else
+      log_warn "未检测到 mysql/mariadb 客户端，无法检查目标数据库是否为空。"
+      return 0
+    fi
+  fi
+
+  table_count="$("$db_client" -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" "-p$DB_PASSWORD" -N -s \
+    -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null)" || true
+
+  if ! [[ "$table_count" =~ ^[0-9]+$ ]]; then
+    log_warn "无法获取目标数据库的表数量，已跳过非空检查。"
+    return 0
+  fi
+
+  if [ "$table_count" -eq 0 ]; then
+    return 0
+  fi
+
+  echo
+  echo -e "${YELLOW}[WARNING]${NC} 目标数据库 ${DB_NAME} 已存在 ${table_count} 张表。"
+  echo "WordPress 安装到非空数据库可能失败，或覆盖已有数据。"
+  echo
+  echo -e "${CYAN}---- Host-side Fix Hint（仅供参考，不会自动执行） ----${NC}"
+  cat <<'EOF'
+列出表（安全）：
+  SHOW TABLES FROM `<DB_NAME>`;
+  SELECT table_name FROM information_schema.tables WHERE table_schema='<DB_NAME>';
+
+可选（⚠️ 可破坏性操作）生成 DROP 语句：
+  SELECT CONCAT('DROP TABLE `', table_name, '`;') AS drop_sql
+  FROM information_schema.tables WHERE table_schema='<DB_NAME>';
+  -- 请确认后手动执行生成的 DROP TABLE 语句
+EOF
+  echo
+  echo "请选择："
+  echo "  1) 中止安装，先手动清理数据库"
+  echo "  2) 继续安装（我已知风险）"
+  read -rp "请输入选项 [1-2] (默认 1): " prompt_choice
+  prompt_choice="${prompt_choice:-1}"
+  case "$prompt_choice" in
+    2) log_warn "已选择继续安装，风险由用户承担。" ;;
+    *) log_warn "已中止安装，请手动清理数据库后重试。"; exit 1 ;;
+  esac
 }
 
 prompt_db_info_lite() {
@@ -2779,6 +2908,9 @@ install_frontend_only_flow() {
   while :; do
     prompt_db_info_lite
     if test_db_connection; then
+      if [ "${LITE_DB_AUTH_STATUS:-}" = "PASS" ]; then
+        warn_lite_db_non_empty "${LITE_DB_CLIENT:-}"
+      fi
       break
     fi
 
