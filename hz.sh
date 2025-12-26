@@ -186,6 +186,113 @@ baseline_diagnostics_menu() {
   done
 }
 
+show_lomp_lnmp_profile_menu() {
+  local choice
+
+  while true; do
+    clear
+
+    if [ "$HZ_LANG" = "en" ]; then
+      cyan "LOMP/LNMP Profile Selector"
+      echo "Select a profile (DB / Redis configuration):"
+      echo "  1) LOMP-Lite (Frontend-only)"
+      echo "  2) LOMP-Standard"
+      echo "  3) LOMP-Hub"
+      echo "  4) LNMP-Lite (Frontend-only)"
+      echo "  5) LNMP-Standard"
+      echo "  6) LNMP-Hub"
+      echo "  0) Back"
+      echo
+      read -rp "Please enter a choice: " choice
+    else
+      cyan "LOMP/LNMP 档位选择"
+      echo "请选择档位（DB / Redis 配置）："
+      echo "  1) LOMP-Lite（Frontend-only）"
+      echo "  2) LOMP-Standard"
+      echo "  3) LOMP-Hub"
+      echo "  4) LNMP-Lite（Frontend-only）"
+      echo "  5) LNMP-Standard"
+      echo "  6) LNMP-Hub"
+      echo "  0) 返回"
+      echo
+      read -rp "请输入选项: " choice
+    fi
+
+    case "$choice" in
+      1)
+        if [ "$HZ_LANG" = "en" ]; then
+          echo "Launching LOMP-Lite (Frontend-only)..."
+        else
+          echo "即将启动 LOMP-Lite（Frontend-only）..."
+        fi
+        HZ_WP_PROFILE="lomp-lite" bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/${HZ_WP_INSTALLER_SCRIPT}")
+        return
+        ;;
+      2)
+        if [ "$HZ_LANG" = "en" ]; then
+          echo "Launching LOMP-Standard..."
+        else
+          echo "即将启动 LOMP-Standard..."
+        fi
+        HZ_WP_PROFILE="lomp-standard" bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/${HZ_WP_INSTALLER_SCRIPT}")
+        return
+        ;;
+      3)
+        if [ "$HZ_LANG" = "en" ]; then
+          echo "LOMP-Hub is coming soon."
+          read -rp "Press Enter to return to menu..." _
+        else
+          echo "LOMP-Hub 暂未开放（敬请期待）。"
+          read -rp "按回车返回菜单..." _
+        fi
+        return
+        ;;
+      4)
+        if [ "$HZ_LANG" = "en" ]; then
+          echo "LNMP-Lite is coming soon."
+          read -rp "Press Enter to return to menu..." _
+        else
+          echo "LNMP-Lite 暂未开放（敬请期待）。"
+          read -rp "按回车返回菜单..." _
+        fi
+        return
+        ;;
+      5)
+        if [ "$HZ_LANG" = "en" ]; then
+          echo "LNMP-Standard is coming soon."
+          read -rp "Press Enter to return to menu..." _
+        else
+          echo "LNMP-Standard 暂未开放（敬请期待）。"
+          read -rp "按回车返回菜单..." _
+        fi
+        return
+        ;;
+      6)
+        if [ "$HZ_LANG" = "en" ]; then
+          echo "LNMP-Hub is coming soon."
+          read -rp "Press Enter to return to menu..." _
+        else
+          echo "LNMP-Hub 暂未开放（敬请期待）。"
+          read -rp "按回车返回菜单..." _
+        fi
+        return
+        ;;
+      0)
+        return
+        ;;
+      *)
+        if [ "$HZ_LANG" = "en" ]; then
+          echo "Invalid choice, please try again."
+          read -rp "Press Enter to continue..." _
+        else
+          echo "无效选项，请重新输入。"
+          read -rp "按回车继续..." _
+        fi
+        ;;
+    esac
+  done
+}
+
 choose_lang() {
   while true; do
     clear
@@ -243,7 +350,7 @@ main_menu() {
       green  " 10) rkhunter (rootkit / trojan scanner)"
       cyan  "  11) rkhunter (daily check / optional mail alert)"
       green " 12) Baseline Diagnostics"
-      cyan  "  13) LOMP/LNMP（DB / Redis 配置）"
+      cyan  "  13) LOMP/LNMP (DB / Redis 配置)"
       yellow "  0) Exit"
       green "  r) Return to language selection / 返回语言选择 "
       echo
@@ -301,8 +408,7 @@ main_menu() {
           baseline_diagnostics_menu
           ;;
         13)
-          echo "Installing LOMP/LNMP (DB / Redis 配置)..."
-          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/${HZ_WP_INSTALLER_SCRIPT}")
+          show_lomp_lnmp_profile_menu
           ;;
         0)
           echo "Bye~"
@@ -395,8 +501,7 @@ main_menu() {
           baseline_diagnostics_menu
           ;;
         13)
-          echo "将安装 LOMP/LNMP (DB / Redis 配置)..."
-          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/${HZ_WP_INSTALLER_SCRIPT}")
+          show_lomp_lnmp_profile_menu
           ;;
         0)
           echo "再见～"

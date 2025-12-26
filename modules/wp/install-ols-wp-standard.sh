@@ -148,6 +148,21 @@ if ! declare -f is_valid_tier >/dev/null 2>&1; then
   }
 fi
 
+normalize_wp_profile() {
+  local profile
+  profile="${1:-}"
+  profile="${profile,,}"
+
+  case "$profile" in
+    lomp-lite|lomp-standard)
+      printf "%s" "$profile"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 get_default_lomp_tier() {
   local normalized
   normalized="$(normalize_tier "${TIER_STANDARD}")" || true
@@ -3345,6 +3360,28 @@ install_hub_flow() {
   esac
 }
 
+run_wp_profile_override() {
+  local profile normalized
+
+  profile="${HZ_WP_PROFILE:-}"
+  if [ -z "$profile" ]; then
+    return 1
+  fi
+
+  normalized="$(normalize_wp_profile "$profile")" || return 1
+
+  case "$normalized" in
+    lomp-lite)
+      install_frontend_only_flow
+      ;;
+    lomp-standard)
+      install_standard_flow
+      ;;
+  esac
+
+  return 0
+}
+
 install_lomp_flow() {
   # [ANCHOR:INSTALL_FLOW]
   local selected_tier
@@ -3366,4 +3403,6 @@ install_lomp_flow() {
 #######################
 
 # [ANCHOR:ENTRYPOINT]
-show_main_menu
+if ! run_wp_profile_override; then
+  show_main_menu
+fi

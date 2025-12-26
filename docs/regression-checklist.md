@@ -9,6 +9,11 @@
 - **菜单标识**：进入中英文菜单确认展示 Version/Build 与 Source/Base URL 行，确保与本次构建一致。
 
 ## 场景回归
+- **安装菜单 13（LOMP/LNMP 档位选择）**
+  - 选择 13 后应进入档位选择子菜单。
+  - LOMP-Lite / LOMP-Standard 会启动 WordPress 安装流程。
+  - 其余档位显示 “Coming soon”/“敬请期待” 并安全返回主菜单。
+
 - **低内存节点 (<4G RAM)**
   - 推荐档位应为 **Lite（Frontend-only）**，理由需展示为“内存 <4G”并提示仅部署前端。
   - 路径确认：Lite 流程不触碰数据库/Redis 本地安装与清理入口，仅保留前端部署；如需 DB/Redis，应在外部节点提前就绪并通过内网/隧道访问。
