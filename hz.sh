@@ -244,7 +244,7 @@ main_menu() {
       green  " 10) rkhunter (rootkit / trojan scanner)"
       cyan  "  11) rkhunter (daily check / optional mail alert)"
       green " 12) Baseline Diagnostics"
-      cyan  "  13) LOMP/LNMP (DB / Redis 配置)"
+      cyan  "  13) LOMP/LNMP（DB / Redis 配置）"
       yellow "  0) Exit"
       green "  r) Return to language selection / 返回语言选择 "
       echo
