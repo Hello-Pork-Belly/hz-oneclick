@@ -1312,15 +1312,23 @@ remove_wp_by_slug() {
   sed -i "/map[[:space:]]\+${slug}[[:space:]]\+/d" "$HTTPD_CONF"
 
   if [ -d "$VH_CONF_DIR" ]; then
-    log_info "删除 vhost 目录: ${VH_CONF_DIR}"
-    rm -rf "$VH_CONF_DIR"
+    if [ -z "${VH_CONF_DIR:-}" ] || [ "$VH_CONF_DIR" = "/" ]; then
+      log_warn "跳过删除 vhost 目录（路径无效）。"
+    else
+      log_info "删除 vhost 目录: ${VH_CONF_DIR}"
+      rm -rf -- "${VH_CONF_DIR:?}"
+    fi
   else
     log_warn "未找到 vhost 目录: ${VH_CONF_DIR}，可能已被删除。"
   fi
 
   if [ -d "$DOC_ROOT_BASE" ]; then
-    log_info "删除站点目录: ${DOC_ROOT_BASE}"
-    rm -rf "$DOC_ROOT_BASE"
+    if [ -z "${DOC_ROOT_BASE:-}" ] || [ "$DOC_ROOT_BASE" = "/" ]; then
+      log_warn "跳过删除站点目录（路径无效）。"
+    else
+      log_info "删除站点目录: ${DOC_ROOT_BASE}"
+      rm -rf -- "${DOC_ROOT_BASE:?}"
+    fi
   else
     log_warn "未找到站点目录: ${DOC_ROOT_BASE}，可能已被删除。"
   fi
@@ -2453,12 +2461,12 @@ download_wordpress() {
   log_info "从官方源下载 WordPress..."
   curl -fsSL https://wordpress.org/latest.tar.gz -o wordpress.tar.gz
   tar -xzf wordpress.tar.gz
-  [ -d wordpress ] || { log_error "解压 WordPress 失败。"; popd >/dev/null; rm -rf "$tmp"; exit 1; }
+  [ -d wordpress ] || { log_error "解压 WordPress 失败。"; popd >/dev/null; rm -rf -- "${tmp:?}"; exit 1; }
 
   cp -a wordpress/. "$DOC_ROOT"/
 
   popd >/dev/null
-  rm -rf "$tmp"
+  rm -rf -- "${tmp:?}"
 
   log_info "WordPress 已部署到 ${DOC_ROOT}。"
 }
