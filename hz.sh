@@ -6,6 +6,9 @@ cyan()   { printf '\033[36m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 
+HZ_ONECLICK_VERSION="v0.9.x"
+HZ_ONECLICK_BUILD="2025-12-27"
+
 # 全局语言变量：en / zh
 HZ_LANG=""
 HZ_BASELINE_FORMAT="${HZ_BASELINE_FORMAT:-text}"
@@ -225,6 +228,8 @@ main_menu() {
       # ===== English menu =====
       cyan  "hz-oneclick - HorizonTech Installer (preview)"
       green "hz-oneclick - HorizonTech one-click installer (preview)"
+      cyan  "Version: ${HZ_ONECLICK_VERSION} (${HZ_ONECLICK_BUILD})"
+      green "Source: ${HZ_INSTALL_BASE_URL}"
       echo
       cyan  "Menu options"
       cyan  "  1) Immich on Cloud (VPS)"
@@ -318,6 +323,8 @@ main_menu() {
       # ===== 中文菜单 =====
       cyan  "hz-oneclick - HorizonTech 一键安装入口（预览版）"
       green "hz-oneclick - HorizonTech 一键安装入口（预览版）"
+      cyan  "版本: ${HZ_ONECLICK_VERSION} (${HZ_ONECLICK_BUILD})"
+      green "来源: ${HZ_INSTALL_BASE_URL}"
       echo
       cyan  "菜单选项 / Menu options"
       cyan  "  1) Immich 上云（VPS）"
