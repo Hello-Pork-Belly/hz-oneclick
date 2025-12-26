@@ -237,6 +237,7 @@ main_menu() {
       green  " 10) rkhunter (rootkit / trojan scanner)"
       cyan  "  11) rkhunter (daily check / optional mail alert)"
       green " 12) Baseline Diagnostics"
+      cyan  "  13) LOMP/LNMP (DB / Redis 配置)"
       yellow "  0) Exit"
       green "  r) Return to language selection / 返回语言选择 "
       echo
@@ -292,6 +293,10 @@ main_menu() {
           ;;
         12)
           baseline_diagnostics_menu
+          ;;
+        13)
+          echo "Installing LOMP/LNMP (DB / Redis 配置)..."
+          bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/install-ols-wp-standard.sh")
           ;;
         0)
           echo "Bye~"
