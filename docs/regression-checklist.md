@@ -14,6 +14,7 @@
   - `rg -n "ols-wp（|ols-wp \\(DB" hz.sh docs/regression-checklist.md modules/wp/install-ols-wp-standard.sh || true`
   - `rg -n "私钥内容" modules/wp/install-ols-wp-standard.sh && exit 1 || true`
   - `rg -n "Private Key" modules/wp/install-ols-wp-standard.sh`
+  - `rg -n "setup-config\\.php" modules/wp/install-ols-wp-standard.sh docs -g '!docs/regression-checklist.md' && exit 1 || true`
 - **DB Grant 源地址**：使用 `rg` 确认脚本中不存在硬编码的 DB 用户来源 IP/Host（例如 `100.x.x.x`）。
 
 ## 场景回归
@@ -21,7 +22,8 @@
   - 选择 13 后应进入档位选择子菜单。
   - LOMP-Lite / LOMP-Standard 会启动 WordPress 安装流程。
   - 其余档位显示 “Coming soon”/“敬请期待” 并安全返回主菜单。
-  - Lite/Standard 安装后应自动生成 wp-config.php，不再需要通过浏览器 setup-config.php 配置数据库。
+  - Lite/Standard 安装后应自动生成 wp-config.php，不再需要通过浏览器配置数据库。
+  - Lite/Standard 必须在继续安装前完成 DB 预检：缺少 mysql/mariadb 客户端时提示安装，且进行连接认证测试。
 
 - **低内存节点 (<4G RAM)**
   - 推荐档位应为 **Lite（Frontend-only）**，理由需展示为“内存 <4G”并提示仅部署前端。

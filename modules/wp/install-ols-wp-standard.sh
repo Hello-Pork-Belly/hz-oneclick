@@ -1741,9 +1741,9 @@ test_db_connection() {
     db_client="mysql"
   elif command -v mariadb >/dev/null 2>&1; then
     db_client="mariadb"
-  elif [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
-    log_warn "DB auth test requires a MySQL/MariaDB client (mysql/mariadb). Install now? (y/N)"
-    read -rp "选择 [y/N]: " install_choice
+  else
+    log_warn "未检测到 mysql/mariadb 客户端，需安装以完成数据库认证检查。"
+    read -rp "是否立即安装 default-mysql-client 或 mariadb-client？[y/N]: " install_choice
     install_choice="${install_choice:-N}"
     if [[ "$install_choice" =~ ^[Yy]$ ]]; then
       if ! apt-get update -qq; then
@@ -1752,15 +1752,19 @@ test_db_connection() {
       if ! apt-get install -y default-mysql-client; then
         log_warn "default-mysql-client 安装失败，尝试 mariadb-client。"
         if ! apt-get install -y mariadb-client; then
-          log_warn "mariadb-client 安装失败，将跳过 DB 认证检查。"
-          LITE_DB_AUTH_STATUS="SKIPPED"
-          return 0
+          log_error "mariadb-client 安装失败，无法完成数据库认证检查。"
+          if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+            LITE_DB_AUTH_STATUS="FAIL"
+          fi
+          return 1
         fi
       fi
     else
-      log_warn "已跳过 DB 认证检查。"
-      LITE_DB_AUTH_STATUS="SKIPPED"
-      return 0
+      log_error "缺少 MySQL/MariaDB 客户端，无法完成数据库认证检查。"
+      if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+        LITE_DB_AUTH_STATUS="FAIL"
+      fi
+      return 1
     fi
 
     if command -v mysql >/dev/null 2>&1; then
@@ -1768,14 +1772,12 @@ test_db_connection() {
     elif command -v mariadb >/dev/null 2>&1; then
       db_client="mariadb"
     else
-      log_warn "未找到 mysql/mariadb 客户端，将跳过 DB 认证检查。"
-      LITE_DB_AUTH_STATUS="SKIPPED"
-      return 0
+      log_error "未找到 mysql/mariadb 客户端，无法完成数据库认证检查。"
+      if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+        LITE_DB_AUTH_STATUS="FAIL"
+      fi
+      return 1
     fi
-  else
-    log_warn "未找到 mysql 客户端，已跳过认证检查。"
-    log_warn "如需完整检查，请安装 mariadb-client 或 mysql-client 后重试。"
-    return 0
   fi
 
   if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ] && [ -n "$db_client" ]; then
@@ -2246,20 +2248,36 @@ update_wp_config_define() {
 }
 
 random_wp_salt() {
-  LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()-_[]{}<>~`+=,.;:?' </dev/urandom | head -c 64
+  local salt=""
+
+  if command -v openssl >/dev/null 2>&1; then
+    salt="$(openssl rand -base64 48 2>/dev/null | tr -d '\n' | head -c 64)"
+  fi
+
+  if [ -z "$salt" ]; then
+    salt="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()-_[]{}<>~`+=,.;:?' </dev/urandom | head -c 64)"
+  fi
+
+  printf "%s" "$salt"
 }
 
 fetch_wp_salts() {
   local salts=""
+  local key
+  local keys=(
+    AUTH_KEY
+    SECURE_AUTH_KEY
+    LOGGED_IN_KEY
+    NONCE_KEY
+    AUTH_SALT
+    SECURE_AUTH_SALT
+    LOGGED_IN_SALT
+    NONCE_SALT
+  )
 
-  if command -v curl >/dev/null 2>&1; then
-    salts="$(curl -fsSL https://api.wordpress.org/secret-key/1.1/salt/ 2>/dev/null || true)"
-    if [ -z "$salts" ]; then
-      log_warn "未能从 WordPress API 获取 salt，将使用本地随机值。"
-    fi
-  else
-    log_warn "未找到 curl，无法获取 WordPress salt，将使用本地随机值。"
-  fi
+  for key in "${keys[@]}"; do
+    salts+="define('${key}', '$(random_wp_salt)');"$'\n'
+  done
 
   printf "%s" "$salts"
 }
@@ -3322,6 +3340,7 @@ print_summary() {
   echo "  1) 在浏览器直接访问 http://${SITE_DOMAIN} 或 http://<服务器IP> 测试站点是否正常;"
   echo "  2) 确认云厂商安全组和本机防火墙均已放行 80/443;"
   echo "  3) 再在 CDN / 加速服务后台开启代理（橙云）和 HTTPS。"
+  echo "  4) 访问 http://${SITE_DOMAIN}/wp-admin/install.php 完成站点初始化（已自动生成 wp-config.php）。"
   echo
 
   print_https_post_install "${SITE_DOMAIN}"
