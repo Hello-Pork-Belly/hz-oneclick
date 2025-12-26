@@ -1005,7 +1005,7 @@ _detect_public_ip() {
   if [ -z "$ipv4" ]; then
     ipv4="$(ip -4 -o addr show 2>/dev/null | awk '!/ lo /{print $4}' | cut -d/ -f1 | while read -r ip; do
       case "$ip" in
-        10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|127.*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*)
+        10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|127.*|100[.]6[4-9].*|100[.][7-9][0-9].*|100[.]1[01][0-9].*|100[.]12[0-7].*)
           continue;;
         *) echo "$ip"; break;;
       esac
@@ -1532,6 +1532,82 @@ prompt_site_info() {
   log_info "站点根目录: ${DOC_ROOT}"
 }
 
+extract_db_host_only() {
+  local host="${1:-}"
+
+  if [[ "$host" == *:* ]]; then
+    echo "${host%%:*}"
+  else
+    echo "$host"
+  fi
+}
+
+is_local_db_host() {
+  local host="${1:-}"
+
+  case "$host" in
+    localhost|127.0.0.1|::1)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+prompt_db_user_host() {
+  # [ANCHOR:DB_USER_HOST_PROMPT]
+  local choice host_input
+
+  echo
+  echo "请选择数据库用户来源（DB_USER_HOST）策略："
+  echo "  1) 默认 '%'（允许任意来源，需确保防火墙/Tailscale 仍有限制）"
+  echo "  2) 安全模式：输入前端机器的 Tailscale IP 或主机名"
+  echo "  3) 高级：自定义 MySQL Host 模式（例如: 10.0.% 或 db-gateway.example.com）"
+  read -rp "请输入选项 [1-3] (默认 1): " choice
+  choice="${choice:-1}"
+
+  case "$choice" in
+    1)
+      DB_USER_HOST="%"
+      log_warn "DB_USER_HOST 已设置为 '%'，请确认防火墙/Tailscale 仅允许可信来源访问数据库。"
+      return 0
+      ;;
+    2|3)
+      while :; do
+        if [ "$choice" = "2" ]; then
+          read -rp "请输入前端机器的 Tailscale IP 或主机名（不支持 CIDR）: " host_input
+        else
+          read -rp "请输入 MySQL Host 模式（不支持 CIDR）: " host_input
+        fi
+
+        if [ -z "$host_input" ]; then
+          log_warn "DB_USER_HOST 不能为空。"
+          continue
+        fi
+        if [[ "$host_input" == *"/"* ]]; then
+          log_error "CIDR 不是 MySQL Host 支持的格式，例如 10.0.0.0/24 无法使用。"
+          log_warn "请改用 MySQL Host 模式，例如单个 IP、主机名或通配符 (10.0.%)。"
+          continue
+        fi
+        if echo "$host_input" | grep -Eq "[[:space:]'\";]"; then
+          log_warn "DB_USER_HOST 不能包含空格或引号等特殊字符。"
+          continue
+        fi
+
+        DB_USER_HOST="$host_input"
+        break
+      done
+      return 0
+      ;;
+    *)
+      log_warn "输入无效，将默认使用 '%'。"
+      DB_USER_HOST="%"
+      return 0
+      ;;
+  esac
+}
+
 prompt_db_info() {
   # [ANCHOR:DB_INFO_PROMPT]
   echo
@@ -1542,7 +1618,7 @@ prompt_db_info() {
   echo
 
   while :; do
-    read -rp "DB Host（可带端口，例如: 100.82.140.65:3306 或 127.0.0.1）: " DB_HOST
+    read -rp "DB Host（可带端口，例如: db.internal.example:3306 或 127.0.0.1）: " DB_HOST
     [ -n "$DB_HOST" ] && break
     log_warn "DB Host 不能为空。"
   done
@@ -1558,6 +1634,15 @@ prompt_db_info() {
     [ -n "$DB_USER" ] && break
     log_warn "DB 用户名不能为空。"
   done
+
+  local host_only
+  host_only="$(extract_db_host_only "$DB_HOST")"
+  if is_local_db_host "$host_only"; then
+    DB_USER_HOST="localhost"
+    log_info "检测到本机数据库，DB_USER_HOST 已设置为 localhost。"
+  else
+    prompt_db_user_host
+  fi
 
   # 密码需要输入两次确认，防止手滑
   while :; do
@@ -1868,7 +1953,7 @@ prompt_db_info_lite() {
   echo
 
   while :; do
-    read -rp "DB Host（例如: 100.x.x.x 或 db.yourdomain.com）: " DB_HOST
+    read -rp "DB Host（例如: db.internal.example 或 192.0.2.10）: " DB_HOST
     [ -n "$DB_HOST" ] && break
     log_warn "DB Host 不能为空。"
   done
@@ -1893,6 +1978,8 @@ prompt_db_info_lite() {
     [ -n "$DB_USER" ] && break
     log_warn "DB 用户名不能为空。"
   done
+
+  prompt_db_user_host
 
   while :; do
     read -rsp "DB 密码（不会回显，请确保与该 DB 用户的真实密码一致）: " DB_PASSWORD
@@ -1932,7 +2019,7 @@ prompt_redis_info_lite() {
   REDIS_ENABLED="yes"
 
   while :; do
-    read -rp "Redis Host（例如: 100.x.x.x 或 redis.yourdomain.com）: " REDIS_HOST
+    read -rp "Redis Host（例如: redis.internal.example 或 192.0.2.20）: " REDIS_HOST
     [ -n "$REDIS_HOST" ] && break
     log_warn "Redis Host 不能为空。"
   done
@@ -2066,6 +2153,7 @@ print_lite_preflight_summary() {
   echo "数据库主机:  ${DB_HOST}:${DB_PORT}"
   echo "数据库名称:  ${DB_NAME}"
   echo "数据库用户:  ${DB_USER}"
+  echo "用户来源:    ${DB_USER_HOST:-%}"
   echo "数据库密码:  已设置（已隐藏）"
   echo "DB TCP 检测: ${db_tcp_status}"
   echo "DB 认证检测: ${db_auth_status}"
@@ -2083,12 +2171,12 @@ print_lite_db_host_fix_guide() {
   echo
   echo -e "${CYAN}---- DB Host-side Fix Guide（仅供排错参考） ----${NC}"
   echo "可让 DB 管理员在数据库主机上执行（替换占位符）："
-  cat <<'EOF'
+  cat <<EOF
 SQL 模板：
-  CREATE DATABASE IF NOT EXISTS `<DB_NAME>`;
-  CREATE USER '<DB_USER>'@'%' IDENTIFIED BY '<DB_PASSWORD>';
-  -- 或者使用更严格的来源限制：'<DB_USER>'@'<CLIENT_OVERLAY_IP>'
-  GRANT ALL PRIVILEGES ON `<DB_NAME>`.* TO '<DB_USER>'@'%';
+  CREATE DATABASE IF NOT EXISTS <DB_NAME>;
+  CREATE USER '<DB_USER>'@'${DB_USER_HOST:-%}' IDENTIFIED BY '<DB_PASSWORD>';
+  -- 可选：使用更严格的来源限制（MySQL Host 模式，不支持 CIDR）
+  GRANT ALL PRIVILEGES ON <DB_NAME>.* TO '<DB_USER>'@'${DB_USER_HOST:-%}';
   FLUSH PRIVILEGES;
 
 验证：
