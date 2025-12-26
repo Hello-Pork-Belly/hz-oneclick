@@ -12,7 +12,7 @@
   - 推荐档位应为 **Lite（Frontend-only）**，理由需展示为“内存 <4G”并提示仅部署前端。
   - 路径确认：Lite 流程不触碰数据库/Redis 本地安装与清理入口，仅保留前端部署；如需 DB/Redis，应在外部节点提前就绪并通过内网/隧道访问。
   - 输出确认：说明下一步需准备可达的数据库与 Redis 连接信息，提示保持端口/防火墙文案中性，不带云厂商名称。
-  - Lite 预检：数据库 DNS/IP 可达、端口 TCP 可达、MySQL 认证通过；Redis 选择启用时需完成 TCP/PING 检查或提示缺少 redis-cli。
+  - Lite 预检：数据库 DNS/IP 可达、端口 TCP 可达、MySQL 认证通过；Redis 选择启用时需完成 TCP/PING 检查或提示缺少 redis-cli；缺失客户端时可选安装 default-mysql-client/mariadb-client 与 redis-tools。
   - Lite 预检失败时：输出包含 DB Host-side Fix Guide（SQL 模板 + Docker 端口/防火墙提示），文本仍保持中性。
 
 - **高配 ARM 节点 (>=16G RAM)**

@@ -1574,6 +1574,8 @@ test_db_connection() {
   local port="${DB_PORT:-3306}"
   local tcp_err=""
   local mysql_err=""
+  local db_client=""
+  local install_choice=""
 
   # 允许 DB_HOST 以 host:port 形式填写
   if [[ "$host" == *:* ]]; then
@@ -1586,6 +1588,10 @@ test_db_connection() {
   fi
   if ! [[ "$port" =~ ^[0-9]+$ ]]; then
     log_error "DB 端口必须为数字（当前: ${port}）。"
+    if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+      LITE_DB_TCP_STATUS="FAIL"
+      LITE_DB_AUTH_STATUS="SKIPPED"
+    fi
     return 1
   fi
   DB_PORT="$port"
@@ -1597,6 +1603,8 @@ test_db_connection() {
       log_warn "可能原因：域名未解析、解析记录未生效、或本机 DNS 无法访问。"
       log_warn "建议检查：域名解析是否指向正确内网/隧道出口、以及本机 /etc/resolv.conf。"
       if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+        LITE_DB_TCP_STATUS="FAIL"
+        LITE_DB_AUTH_STATUS="SKIPPED"
         print_lite_db_host_fix_guide
       fi
       return 1
@@ -1608,26 +1616,72 @@ test_db_connection() {
     log_error "无法连接到 ${host}:${port}（TCP 不可达）。"
     log_warn "可能原因：防火墙/安全组未放行端口、服务未监听、内网或隧道未连接、地址填写错误。"
     if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+      LITE_DB_TCP_STATUS="FAIL"
+      LITE_DB_AUTH_STATUS="SKIPPED"
       log_warn "补充提示：端口未对外暴露、bind-address 限制、或安全组/UFW 未放行也会导致失败。"
       print_lite_db_host_fix_guide
     fi
     [ -n "$tcp_err" ] && log_warn "系统提示: ${tcp_err}"
     return 1
   fi
+  if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+    LITE_DB_TCP_STATUS="PASS"
+  fi
 
   # 确保有 mysql/mariadb 客户端可用
-  if ! command -v mysql >/dev/null 2>&1; then
+  if command -v mysql >/dev/null 2>&1; then
+    db_client="mysql"
+  elif command -v mariadb >/dev/null 2>&1; then
+    db_client="mariadb"
+  elif [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+    log_warn "DB auth test requires a MySQL/MariaDB client (mysql/mariadb). Install now? (y/N)"
+    read -rp "选择 [y/N]: " install_choice
+    install_choice="${install_choice:-N}"
+    if [[ "$install_choice" =~ ^[Yy]$ ]]; then
+      if ! apt-get update -qq; then
+        log_warn "apt-get update 失败，后续安装可能无法完成。"
+      fi
+      if ! apt-get install -y default-mysql-client; then
+        log_warn "default-mysql-client 安装失败，尝试 mariadb-client。"
+        if ! apt-get install -y mariadb-client; then
+          log_warn "mariadb-client 安装失败，将跳过 DB 认证检查。"
+          LITE_DB_AUTH_STATUS="SKIPPED"
+          return 0
+        fi
+      fi
+    else
+      log_warn "已跳过 DB 认证检查。"
+      LITE_DB_AUTH_STATUS="SKIPPED"
+      return 0
+    fi
+
+    if command -v mysql >/dev/null 2>&1; then
+      db_client="mysql"
+    elif command -v mariadb >/dev/null 2>&1; then
+      db_client="mariadb"
+    else
+      log_warn "未找到 mysql/mariadb 客户端，将跳过 DB 认证检查。"
+      LITE_DB_AUTH_STATUS="SKIPPED"
+      return 0
+    fi
+  else
     log_warn "未找到 mysql 客户端，已跳过认证检查。"
     log_warn "如需完整检查，请安装 mariadb-client 或 mysql-client 后重试。"
     return 0
   fi
 
-  if mysql_err="$( { mysql -h "$host" -P "$port" -u "$DB_USER" "-p$DB_PASSWORD" -e "SELECT 1;" >/dev/null; } 2>&1 )"; then
+  if mysql_err="$( { "$db_client" -h "$host" -P "$port" -u "$DB_USER" "-p$DB_PASSWORD" -e "SELECT 1;" >/dev/null; } 2>&1 )"; then
     log_info "认证通过：${DB_USER}@${host}:${port}"
+    if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+      LITE_DB_AUTH_STATUS="PASS"
+    fi
     return 0
   fi
 
   log_error "数据库认证失败：${DB_USER}@${host}:${port}"
+  if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
+    LITE_DB_AUTH_STATUS="FAIL"
+  fi
   if echo "$mysql_err" | grep -qi "Access denied"; then
     log_warn "可能原因：用户名/密码错误，或该用户未被授权从此主机连接。"
     if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
@@ -1760,13 +1814,18 @@ test_redis_connection_lite() {
   local port="${REDIS_PORT:-6379}"
   local tcp_err=""
   local ping_err=""
+  local install_choice=""
 
   if [ -z "$host" ]; then
     log_error "Redis Host 不能为空。"
+    LITE_REDIS_TCP_STATUS="FAIL"
+    LITE_REDIS_AUTH_STATUS="SKIPPED"
     return 1
   fi
   if ! [[ "$port" =~ ^[0-9]+$ ]]; then
     log_error "Redis 端口必须为数字（当前: ${port}）。"
+    LITE_REDIS_TCP_STATUS="FAIL"
+    LITE_REDIS_AUTH_STATUS="SKIPPED"
     return 1
   fi
 
@@ -1776,6 +1835,8 @@ test_redis_connection_lite() {
       log_error "DNS 解析失败：${host}"
       log_warn "可能原因：域名未解析、解析记录未生效、或本机 DNS 无法访问。"
       log_warn "建议检查：域名解析是否指向正确内网/隧道出口、以及本机 /etc/resolv.conf。"
+      LITE_REDIS_TCP_STATUS="FAIL"
+      LITE_REDIS_AUTH_STATUS="SKIPPED"
       return 1
     fi
   fi
@@ -1785,13 +1846,33 @@ test_redis_connection_lite() {
     log_error "无法连接到 ${host}:${port}（TCP 不可达）。"
     log_warn "可能原因：防火墙/安全组未放行端口、服务未监听、内网或隧道未连接、地址填写错误。"
     [ -n "$tcp_err" ] && log_warn "系统提示: ${tcp_err}"
+    LITE_REDIS_TCP_STATUS="FAIL"
+    LITE_REDIS_AUTH_STATUS="SKIPPED"
     return 1
   fi
+  LITE_REDIS_TCP_STATUS="PASS"
 
   if ! command -v redis-cli >/dev/null 2>&1; then
-    log_warn "未找到 redis-cli，无法执行 PING 认证检查。"
-    log_warn "可安装 redis-tools 或 redis-cli 后重试。"
-    return 0
+    log_warn "Redis test requires redis-cli. Install now? (y/N)"
+    read -rp "选择 [y/N]: " install_choice
+    install_choice="${install_choice:-N}"
+    if [[ "$install_choice" =~ ^[Yy]$ ]]; then
+      if ! apt-get install -y redis-tools; then
+        log_warn "redis-tools 安装失败，将跳过 Redis PING 检查。"
+        LITE_REDIS_AUTH_STATUS="SKIPPED"
+        return 0
+      fi
+    else
+      log_warn "已跳过 Redis PING 检查。"
+      LITE_REDIS_AUTH_STATUS="SKIPPED"
+      return 0
+    fi
+
+    if ! command -v redis-cli >/dev/null 2>&1; then
+      log_warn "未找到 redis-cli，将跳过 Redis PING 检查。"
+      LITE_REDIS_AUTH_STATUS="SKIPPED"
+      return 0
+    fi
   fi
 
   if [ -n "$REDIS_PASSWORD" ]; then
@@ -1802,10 +1883,12 @@ test_redis_connection_lite() {
 
   if echo "$ping_err" | grep -qi "PONG"; then
     log_info "Redis PING 成功：${host}:${port}"
+    LITE_REDIS_AUTH_STATUS="PASS"
     return 0
   fi
 
   log_error "Redis PING 失败：${host}:${port}"
+  LITE_REDIS_AUTH_STATUS="FAIL"
   if echo "$ping_err" | grep -qi "NOAUTH"; then
     log_warn "可能原因：Redis 密码错误或未授权。"
   elif echo "$ping_err" | grep -qi "Connection refused"; then
@@ -1820,12 +1903,18 @@ print_lite_preflight_summary() {
   # [ANCHOR:LITE_PREFLIGHT_SUMMARY]
   local redis_status="未启用"
   local redis_pass_status="未设置"
+  local redis_tcp_status="未启用"
+  local redis_auth_status="未启用"
+  local db_tcp_status="${LITE_DB_TCP_STATUS:-未知}"
+  local db_auth_status="${LITE_DB_AUTH_STATUS:-未知}"
 
   if [ "${REDIS_ENABLED:-no}" = "yes" ]; then
     redis_status="${REDIS_HOST}:${REDIS_PORT}"
     if [ -n "$REDIS_PASSWORD" ]; then
       redis_pass_status="已设置"
     fi
+    redis_tcp_status="${LITE_REDIS_TCP_STATUS:-未知}"
+    redis_auth_status="${LITE_REDIS_AUTH_STATUS:-未知}"
   fi
 
   echo
@@ -1834,9 +1923,13 @@ print_lite_preflight_summary() {
   echo "数据库名称:  ${DB_NAME}"
   echo "数据库用户:  ${DB_USER}"
   echo "数据库密码:  已设置（已隐藏）"
+  echo "DB TCP 检测: ${db_tcp_status}"
+  echo "DB 认证检测: ${db_auth_status}"
   echo "Redis 配置:  ${redis_status}"
   if [ "${REDIS_ENABLED:-no}" = "yes" ]; then
     echo "Redis 密码:  ${redis_pass_status}"
+    echo "Redis TCP 检测: ${redis_tcp_status}"
+    echo "Redis PING 检测: ${redis_auth_status}"
   fi
   echo
 }
