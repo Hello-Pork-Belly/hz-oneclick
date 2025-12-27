@@ -33,7 +33,7 @@ jobs:
 
       - name: Bash syntax check
         run: |
-          bash .github/scripts/lint_bash.sh
+          bash scripts/lint.sh
 
       - name: Smoke selftest
         run: |

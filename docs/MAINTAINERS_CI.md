@@ -24,11 +24,11 @@ grep -n "sh\\.horizontech\\.page" "$tmp" && echo "BAD" || echo "OK"
 Prerequisites: bash, grep, curl (optional: shellcheck, shfmt).
 
 ```bash
-bash .github/scripts/run_ci_locally.sh
+bash scripts/ci_local.sh
 ```
 
 ```bash
-bash .github/scripts/lint_bash.sh
+bash scripts/lint.sh
 ```
 
 ```bash
@@ -47,7 +47,7 @@ bash .github/scripts/smoke_gating.sh self-test
   - `notes`: optional run notes (printed to logs)
 - Safety model: defaults to preflight checks only; install mode is blocked unless the confirmation string is provided.
 - Intended for dedicated test machines only.
-- Validates the same local CI parity checks via `.github/scripts/run_ci_locally.sh` on real machines.
+- Validates the same local CI parity checks via `scripts/ci_local.sh` on real machines.
 
 ## PR Smoke（快速检查）
 

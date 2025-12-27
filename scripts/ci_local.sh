@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 install_status="SKIP"
 integrity_status=1
@@ -50,7 +50,7 @@ set -e
 echo ""
 echo "==> Bash lint"
 set +e
-bash .github/scripts/lint_bash.sh
+bash scripts/lint.sh
 lint_status=$?
 set -e
 
@@ -87,8 +87,8 @@ enforce_output="$(bash .github/scripts/smoke_gating.sh enforce --verdict "$smoke
 enforce_status=$?
 set -e
 
-enforce_verdict="$(printf '%s' "$enforce_output" | sed -n 's/.*verdict=\([^ ]*\).*/\1/p')"
-enforce_strict="$(printf '%s' "$enforce_output" | sed -n 's/.*strict=\([^ ]*\).*/\1/p')"
+enforce_verdict="$(printf '%s' "$enforce_output" | sed -n 's/.*verdict=\\([^ ]*\\).*/\\1/p')"
+enforce_strict="$(printf '%s' "$enforce_output" | sed -n 's/.*strict=\\([^ ]*\\).*/\\1/p')"
 enforce_verdict="${enforce_verdict:-FAIL}"
 enforce_strict="${enforce_strict:-false}"
 
@@ -108,9 +108,9 @@ else
   echo "- repo_integrity: FAIL (exit=${integrity_status})"
 fi
 if [ "$lint_status" -eq 0 ]; then
-  echo "- lint_bash: PASS"
+  echo "- lint: PASS"
 else
-  echo "- lint_bash: FAIL (exit=${lint_status})"
+  echo "- lint: FAIL (exit=${lint_status})"
 fi
 if [ "$selftest_status" -eq 0 ]; then
   echo "- smoke_selftest: PASS"

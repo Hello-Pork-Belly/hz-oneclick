@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
 strict=0
 for arg in "$@"; do
   case "$arg" in
@@ -15,12 +18,12 @@ for arg in "$@"; do
   esac
 done
 
-if [[ ! -f .github/scripts/lint_bash.sh ]]; then
+if [[ ! -d "$repo_root/.github" ]]; then
   echo "ERROR: scripts/lint.sh must be run from the repository root"
   exit 1
 fi
 
-# Keep discovery consistent with CI linting (.github/scripts/lint_bash.sh).
+# Keep discovery consistent with CI linting.
 mapfile -d '' -t files < <(find ./modules ./tests ./.github/scripts -type f -name '*.sh' -print0)
 
 script_count=${#files[@]}
