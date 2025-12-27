@@ -2752,13 +2752,38 @@ ensure_lsphp_imagick() {
 }
 
 resolve_default_theme_slug() {
-  local year
+  local year suffix
   year="$(date +%Y)"
   case "$year" in
-    2025) printf "twentytwentyfive" ;;
-    2026) printf "twentytwentysix" ;;
-    *) printf "" ;;
+    2020) suffix="base";;
+    2021) suffix="one";;
+    2022) suffix="two";;
+    2023) suffix="three";;
+    2024) suffix="four";;
+    2025) suffix="five";;
+    2026) suffix="six";;
+    2027) suffix="seven";;
+    2028) suffix="eight";;
+    2029) suffix="nine";;
+    2030) suffix="ten";;
+    2031) suffix="eleven";;
+    2032) suffix="twelve";;
+    2033) suffix="thirteen";;
+    2034) suffix="fourteen";;
+    2035) suffix="fifteen";;
+    *) suffix="";;
   esac
+
+  if [ -z "$suffix" ]; then
+    printf ""
+    return
+  fi
+
+  if [ "$suffix" = "base" ]; then
+    printf "twentytwenty"
+  else
+    printf "twentytwenty%s" "$suffix"
+  fi
 }
 
 ensure_default_theme_policy() {
