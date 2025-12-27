@@ -2300,6 +2300,310 @@ update_wp_config_define() {
   fi
 }
 
+get_site_domain() {
+  local domain=""
+
+  if [ -n "${SITE_DOMAIN:-}" ]; then
+    domain="$SITE_DOMAIN"
+  elif [ -n "${PRIMARY_DOMAIN:-}" ]; then
+    domain="$PRIMARY_DOMAIN"
+  elif [ -n "${DOMAIN:-}" ]; then
+    domain="$DOMAIN"
+  fi
+
+  printf "%s" "$domain"
+}
+
+detect_lsphp_bin() {
+  local bins=()
+  local bin
+
+  for bin in /usr/local/lsws/lsphp*/bin/php; do
+    if [ -x "$bin" ]; then
+      bins+=("$bin")
+    fi
+  done
+
+  if [ "${#bins[@]}" -gt 0 ]; then
+    printf "%s\n" "${bins[@]}" | sort -V | tail -n1
+    return 0
+  fi
+
+  if command -v php >/dev/null 2>&1; then
+    command -v php
+    return 0
+  fi
+
+  return 1
+}
+
+get_lsphp_pkg_suffix() {
+  local php_bin="$1"
+  local version suffix
+
+  version="$("$php_bin" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)" || true
+  suffix="${version//./}"
+
+  if [ -n "$suffix" ]; then
+    printf "%s" "$suffix"
+    return 0
+  fi
+
+  printf "83"
+}
+
+get_lsphp_ini_path() {
+  local php_bin="$1"
+  local ini
+
+  ini="$("$php_bin" -i 2>/dev/null | awk -F'=> ' '/Loaded Configuration File/ {print $2; exit}')"
+  if [ -n "$ini" ] && [ "$ini" != "(none)" ]; then
+    printf "%s" "$ini"
+    return 0
+  fi
+
+  return 1
+}
+
+update_php_ini_value() {
+  local ini="$1"
+  local key="$2"
+  local value="$3"
+
+  if grep -Eq "^[[:space:]]*${key}[[:space:]]*=" "$ini"; then
+    if grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*${value}[[:space:]]*$" "$ini"; then
+      return 1
+    fi
+    sed -i "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$ini"
+    return 0
+  fi
+
+  echo "${key} = ${value}" >>"$ini"
+  return 0
+}
+
+ensure_lsphp_extensions() {
+  local php_bin="$1"
+  local pkg_suffix
+  local modules
+  local missing=()
+  local missing_names=()
+  local has_mysql="no"
+
+  modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || modules=""
+  pkg_suffix="$(get_lsphp_pkg_suffix "$php_bin")"
+
+  if ! printf '%s\n' "$modules" | grep -qx "curl"; then
+    missing+=("lsphp${pkg_suffix}-curl")
+    missing_names+=("curl")
+  fi
+  if ! printf '%s\n' "$modules" | grep -qx "intl"; then
+    missing+=("lsphp${pkg_suffix}-intl")
+    missing_names+=("intl")
+  fi
+  if ! printf '%s\n' "$modules" | grep -qx "zip"; then
+    missing+=("lsphp${pkg_suffix}-zip")
+    missing_names+=("zip")
+  fi
+  if ! printf '%s\n' "$modules" | grep -qx "gd"; then
+    missing+=("lsphp${pkg_suffix}-gd")
+    missing_names+=("gd")
+  fi
+  if ! printf '%s\n' "$modules" | grep -qx "mbstring"; then
+    missing+=("lsphp${pkg_suffix}-mbstring")
+    missing_names+=("mbstring")
+  fi
+  if printf '%s\n' "$modules" | grep -qx "mysqli"; then
+    has_mysql="yes"
+  elif printf '%s\n' "$modules" | grep -qx "pdo_mysql"; then
+    has_mysql="yes"
+  fi
+  if [ "$has_mysql" != "yes" ]; then
+    missing+=("lsphp${pkg_suffix}-mysql")
+    missing_names+=("mysql")
+  fi
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    log_info "安装缺失的 PHP 扩展（${missing_names[*]}）..."
+    apt install -y "${missing[@]}"
+    return 0
+  fi
+
+  return 1
+}
+
+safe_remove_path() {
+  local target="$1"
+  local base="$2"
+
+  if [ -z "$target" ] || [ -z "$base" ]; then
+    log_warn "清理路径为空，跳过。"
+    return 1
+  fi
+
+  case "$target" in
+    "$base"/*) ;;
+    *)
+      log_warn "清理路径不在预期目录内，跳过：$target"
+      return 1
+      ;;
+  esac
+
+  if [ -d "$target" ]; then
+    rm -rf -- "$target"
+    return 0
+  fi
+
+  if [ -f "$target" ]; then
+    rm -f -- "$target"
+    return 0
+  fi
+
+  return 1
+}
+
+apply_wp_site_health_baseline() {
+  # [ANCHOR:WP_SITE_HEALTH_BASELINE]
+  local wp_config="${DOC_ROOT}/wp-config.php"
+  local wp_content="${DOC_ROOT}/wp-content"
+  local summary=()
+  local tier="${BASELINE_TIER:-$TIER_STANDARD}"
+  local domain https_url
+  local php_bin php_ini
+  local ini_hash_before ini_hash_after
+  local php_ini_changed=0
+  local php_ext_changed=0
+  local cleanup_plugins="no"
+  local cleanup_themes="no"
+  local cache_applied="no"
+  local memory_applied="no"
+  local https_applied="no"
+
+  if [ ! -f "$wp_config" ]; then
+    log_warn "未找到 ${wp_config}，跳过 Site Health baseline。"
+    return
+  fi
+
+  domain="$(get_site_domain)"
+  if [ -n "$domain" ]; then
+    https_url="https://${domain}"
+    update_wp_config_define "$wp_config" "WP_HOME" "$https_url" "string"
+    update_wp_config_define "$wp_config" "WP_SITEURL" "$https_url" "string"
+    https_applied="yes"
+  else
+    log_warn "未检测到域名，跳过 HTTPS URL 写入。"
+  fi
+
+  update_wp_config_define "$wp_config" "WP_MEMORY_LIMIT" "128M" "string"
+  update_wp_config_define "$wp_config" "WP_MAX_MEMORY_LIMIT" "256M" "string"
+  memory_applied="yes"
+
+  if [ "${LSCWP_ENABLED:-no}" = "yes" ] \
+    || [ -d "${wp_content}/plugins/litespeed-cache" ]; then
+    update_wp_config_define "$wp_config" "WP_CACHE" "true" "raw"
+    cache_applied="yes"
+  fi
+
+  php_bin="$(detect_lsphp_bin)" || php_bin=""
+  if [ -n "$php_bin" ]; then
+    if ensure_lsphp_extensions "$php_bin"; then
+      php_ext_changed=1
+    fi
+
+    if php_ini="$(get_lsphp_ini_path "$php_bin")" && [ -f "$php_ini" ]; then
+      ini_hash_before="$(sha256sum "$php_ini" | awk '{print $1}')"
+
+      if [ "$tier" = "$TIER_LITE" ]; then
+        update_php_ini_value "$php_ini" "upload_max_filesize" "32M" || true
+        update_php_ini_value "$php_ini" "post_max_size" "64M" || true
+      else
+        update_php_ini_value "$php_ini" "upload_max_filesize" "64M" || true
+        update_php_ini_value "$php_ini" "post_max_size" "128M" || true
+      fi
+
+      ini_hash_after="$(sha256sum "$php_ini" | awk '{print $1}')"
+      if [ "$ini_hash_before" != "$ini_hash_after" ]; then
+        php_ini_changed=1
+      fi
+    else
+      log_warn "未检测到有效的 php.ini，跳过上传限制调整。"
+    fi
+  else
+    log_warn "未检测到 LSPHP，可执行 PHP 配置与扩展检查已跳过。"
+  fi
+
+  if [ -d "$wp_content/plugins" ]; then
+    if safe_remove_path "${wp_content}/plugins/akismet" "$wp_content"; then
+      cleanup_plugins="yes"
+    fi
+    if safe_remove_path "${wp_content}/plugins/hello" "$wp_content"; then
+      cleanup_plugins="yes"
+    fi
+    if safe_remove_path "${wp_content}/plugins/hello.php" "$wp_content"; then
+      cleanup_plugins="yes"
+    fi
+  else
+    log_warn "未找到 ${wp_content}/plugins，跳过插件清理。"
+  fi
+
+  if [ -d "$wp_content/themes" ]; then
+    local theme_dir theme_name
+    local themes=()
+    local latest_theme=""
+    for theme_dir in "${wp_content}/themes"/twentytwenty*; do
+      [ -d "$theme_dir" ] || continue
+      theme_name="$(basename "$theme_dir")"
+      themes+=("$theme_name")
+    done
+
+    if [ "${#themes[@]}" -gt 0 ]; then
+      latest_theme="$(printf "%s\n" "${themes[@]}" | sort -V | tail -n1)"
+      for theme_name in "${themes[@]}"; do
+        if [ "$theme_name" = "$latest_theme" ]; then
+          continue
+        fi
+        if safe_remove_path "${wp_content}/themes/${theme_name}" "$wp_content"; then
+          cleanup_themes="yes"
+        fi
+      done
+    fi
+  else
+    log_warn "未找到 ${wp_content}/themes，跳过主题清理。"
+  fi
+
+  if [ "$php_ini_changed" -eq 1 ] || [ "$php_ext_changed" -eq 1 ]; then
+    systemctl restart lsws
+  fi
+
+  if [ "$https_applied" = "yes" ]; then
+    summary+=("HTTPS URL 固定")
+  fi
+  if [ "$cache_applied" = "yes" ]; then
+    summary+=("缓存开关")
+  fi
+  if [ "$memory_applied" = "yes" ]; then
+    summary+=("WP 内存限制")
+  fi
+  if [ "$php_ini_changed" -eq 1 ]; then
+    summary+=("上传限制")
+  fi
+  if [ "$php_ext_changed" -eq 1 ]; then
+    summary+=("PHP 扩展")
+  fi
+  if [ "$cleanup_plugins" = "yes" ]; then
+    summary+=("插件清理")
+  fi
+  if [ "$cleanup_themes" = "yes" ]; then
+    summary+=("主题清理")
+  fi
+
+  if [ "${#summary[@]}" -gt 0 ]; then
+    log_info "Baseline applied: ${summary[*]}"
+  else
+    log_info "Baseline applied: 无需更改"
+  fi
+}
+
 random_wp_salt() {
   local salt=""
 
@@ -3406,6 +3710,7 @@ install_frontend_only_flow() {
   require_root
   check_os
   LITE_PREFLIGHT_MODE=1
+  BASELINE_TIER="$TIER_LITE"
   log_step "LOMP-Lite (Frontend-only): external DB/Redis"
   prompt_site_info
 
@@ -3463,6 +3768,7 @@ install_frontend_only_flow() {
   setup_site_size_limit_monitor
   generate_wp_config
   ensure_wp_redis_config
+  apply_wp_site_health_baseline
   fix_permissions
   env_self_check
   configure_ssl
@@ -3494,6 +3800,7 @@ install_standard_flow() {
   require_root
   check_os
   LITE_PREFLIGHT_MODE=0
+  BASELINE_TIER="$TIER_STANDARD"
   prompt_site_info
 
   # 循环输入 DB 信息并测试连通性，直到成功或用户选择退出
@@ -3529,6 +3836,7 @@ install_standard_flow() {
   prompt_site_size_limit
   setup_site_size_limit_monitor
   generate_wp_config
+  apply_wp_site_health_baseline
   fix_permissions
   env_self_check
   configure_ssl
@@ -3815,6 +4123,7 @@ install_hub_flow() {
 
   require_root
   check_os
+  BASELINE_TIER="$TIER_HUB"
   prompt_site_info
   prompt_hub_bind_host
 
@@ -3828,6 +4137,7 @@ install_hub_flow() {
   prompt_site_size_limit
   setup_site_size_limit_monitor
   generate_wp_config
+  apply_wp_site_health_baseline
   fix_permissions
   env_self_check
   configure_ssl

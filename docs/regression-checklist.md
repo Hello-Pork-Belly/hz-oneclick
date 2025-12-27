@@ -9,6 +9,10 @@
 - **Loopback 预检**：确认标准 WP 安装脚本包含本机 HTTPS loopback/REST API 预检，且使用 `openssl s_client` + `curl --resolve` 进行 SNI/回环检查。
 - **Loopback hosts 标记**：使用 `rg` 确认脚本中存在 `# hz-oneclick loopback begin` / `# hz-oneclick loopback end` 标记字符串。
 - **中性输出**：新增/调整的 loopback/hosts 修复提示保持中性描述，不出现云厂商名称。
+- **HTTPS 固定写入**：使用 `rg` 确认安装脚本包含 `WP_HOME`/`WP_SITEURL` 的 wp-config 写入逻辑，例如：
+  - `rg -n "WP_HOME|WP_SITEURL" modules/wp/install-ols-wp-standard.sh`
+- **默认插件清理**：使用 `rg` 确认安装脚本包含 Akismet/Hello Dolly 清理逻辑，例如：
+  - `rg -n "akismet|hello\\.php" modules/wp/install-ols-wp-standard.sh`
 - **菜单标识**：进入中英文菜单确认展示 Version/Build 与 Source/Base URL 行，确保与本次构建一致。
 - **文案回归**：执行 `rg` 检查旧文案已移除，例如：
   - `rg -n "ols-wp（|ols-wp \\(DB" hz.sh docs/regression-checklist.md modules/wp/install-ols-wp-standard.sh || true`
@@ -25,6 +29,7 @@
   - 其余档位显示 “Coming soon”/“敬请期待” 并安全返回主菜单。
   - Lite/Standard 安装后应自动生成 wp-config.php，不再需要通过浏览器配置数据库。
   - Lite/Standard 必须在继续安装前完成 DB 预检：缺少 mysql/mariadb 客户端时提示安装，且进行连接认证测试。
+  - Lite/Standard 安装完成后应固定 HTTPS 地址并完成基础清理（默认插件/主题清理 + baseline 输出）。
 
 - **低内存节点 (<4G RAM)**
   - 推荐档位应为 **Lite（Frontend-only）**，理由需展示为“内存 <4G”并提示仅部署前端。
