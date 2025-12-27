@@ -2704,61 +2704,87 @@ ensure_uploads_fonts_dir() {
   fi
 }
 
-ensure_lsphp_imagick() {
+ensure_lsphp_modules_recommended() {
   # [ANCHOR:WP_IMAGICK]
-  local php_bin pkg_suffix imagick_pkg
+  local php_bin php_version pkg_prefix
   local modules
   local missing=()
+  local is_lsws="no"
+  local status_imagick status_intl
 
-  php_bin="$(detect_lsphp_bin 2>/dev/null || true)"
-  if [ -z "$php_bin" ] || [[ "$php_bin" != /usr/local/lsws/lsphp*/bin/php ]]; then
-    log_warn "未检测到 LSPHP，可用 Imagick 安装已跳过。"
+  php_bin="$(command -v php 2>/dev/null || true)"
+  if [ -z "$php_bin" ]; then
+    log_warn "未检测到 PHP CLI，推荐模块检查已跳过。"
     return
   fi
 
-  pkg_suffix="$(get_lsphp_pkg_suffix "$php_bin")"
-  imagick_pkg="lsphp${pkg_suffix}-imagick"
+  if "$php_bin" -v 2>/dev/null | grep -qi "LiteSpeed"; then
+    is_lsws="yes"
+  elif command -v lsphp >/dev/null 2>&1; then
+    is_lsws="yes"
+  elif command -v systemctl >/dev/null 2>&1 && systemctl status lsws >/dev/null 2>&1; then
+    is_lsws="yes"
+  fi
 
+  if [ "$is_lsws" != "yes" ]; then
+    log_info "当前 PHP 非 LiteSpeed/LSWS，跳过推荐模块安装以避免混用 PHP 栈。"
+    return
+  fi
+
+  php_version="$("$php_bin" -r 'echo PHP_MAJOR_VERSION.PHP_MINOR_VERSION;' 2>/dev/null || true)"
+  if [ -z "$php_version" ]; then
+    log_warn "无法识别 PHP 版本，推荐模块安装已跳过。"
+    return
+  fi
+
+  pkg_prefix="lsphp${php_version}"
   modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || modules=""
-  if printf '%s\n' "$modules" | grep -qx "imagick"; then
-    return
-  fi
 
-  if command -v dpkg >/dev/null 2>&1; then
-    if ! dpkg -l | grep -q "^ii[[:space:]]\\+${imagick_pkg}[[:space:]]"; then
-      missing+=("$imagick_pkg")
-    fi
-    if ! dpkg -l | grep -q "^ii[[:space:]]\\+imagemagick[[:space:]]"; then
-      missing+=("imagemagick")
-    fi
-  else
-    missing+=("$imagick_pkg" "imagemagick")
+  if ! printf '%s\n' "$modules" | grep -qx "imagick"; then
+    missing+=("${pkg_prefix}-imagick")
+  fi
+  if ! printf '%s\n' "$modules" | grep -qx "intl"; then
+    missing+=("${pkg_prefix}-intl")
   fi
 
   if [ "${#missing[@]}" -eq 0 ]; then
+    log_info "推荐 PHP 模块已安装（imagick/intl）。"
     return
   fi
 
   if ! command -v apt-get >/dev/null 2>&1; then
-    log_warn "未检测到 apt-get，Imagick 安装已跳过。"
+    log_warn "未检测到 apt-get，推荐模块安装已跳过。"
     return
   fi
 
-  log_info "尝试安装 Imagick 扩展（${missing[*]}）..."
+  log_info "尝试安装推荐 PHP 模块（${missing[*]}）..."
   if ! apt-get update -qq; then
-    log_warn "apt-get update 失败，Imagick 安装可能无法完成。"
+    log_warn "apt-get update 失败，推荐模块安装可能无法完成。"
   fi
 
   if ! apt-get install -y "${missing[@]}"; then
-    log_warn "Imagick 安装失败，跳过。"
+    log_warn "推荐模块安装失败（${missing[*]}），继续执行。"
     return
   fi
 
   if systemctl restart lsws >/dev/null 2>&1; then
-    log_info "OpenLiteSpeed 已重启以加载 Imagick。"
+    log_info "OpenLiteSpeed 已重启以加载推荐 PHP 模块。"
   else
     log_warn "OpenLiteSpeed 重启失败，请手动检查。"
   fi
+
+  modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || modules=""
+  if printf '%s\n' "$modules" | grep -qx "imagick"; then
+    status_imagick="ok"
+  else
+    status_imagick="missing"
+  fi
+  if printf '%s\n' "$modules" | grep -qx "intl"; then
+    status_intl="ok"
+  else
+    status_intl="missing"
+  fi
+  log_info "推荐 PHP 模块状态：imagick=${status_imagick}, intl=${status_intl}"
 }
 
 resolve_default_theme_slug() {
@@ -2860,7 +2886,7 @@ apply_wp_lomp_baseline() {
   ensure_lscache_only
   ensure_wp_cache
   ensure_uploads_fonts_dir
-  ensure_lsphp_imagick
+  ensure_lsphp_modules_recommended
   ensure_default_theme_policy
   # [ANCHOR:WP_BASELINE_END]
 }
