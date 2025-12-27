@@ -24,15 +24,21 @@ grep -n "sh\\.horizontech\\.page" "$tmp" && echo "BAD" || echo "OK"
 Prerequisites: bash, grep, curl (optional: shellcheck, shfmt).
 
 ```bash
-bash scripts/ci_local.sh
+make ci
 ```
 
 ```bash
-bash scripts/lint.sh
+make lint
 ```
 
 ```bash
 bash .github/scripts/smoke_gating.sh self-test
+```
+
+For parity logs on real machines, you can also run:
+
+```bash
+bash scripts/ci_local.sh
 ```
 
 ## Real-machine E2E (self-hosted)

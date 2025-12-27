@@ -42,7 +42,7 @@ echo "==> Run local CI parity (always)"
 if [ "$mode" = "preflight" ]; then
   export HZ_SKIP_CI_TOOLS_INSTALL=1
 fi
-bash .github/scripts/run_ci_locally.sh 2>&1 | tee "$log_dir/run_ci_locally.log"
+bash scripts/ci_local.sh 2>&1 | tee "$log_dir/run_ci_locally.log"
 
 echo ""
 if [ "$mode" = "preflight" ]; then

@@ -50,14 +50,14 @@ set -e
 echo ""
 echo "==> Bash lint"
 set +e
-bash scripts/lint.sh
+make lint
 lint_status=$?
 set -e
 
 echo ""
 echo "==> Smoke selftest"
 set +e
-HZ_SMOKE_SELFTEST=1 bash tests/smoke.sh
+make smoke-selftest
 selftest_status=$?
 set -e
 
@@ -65,7 +65,7 @@ echo ""
 echo "==> Smoke test (safe run)"
 smoke_output_file="$(mktemp)"
 set +e
-GITHUB_OUTPUT="$smoke_output_file" HZ_CI_SMOKE=1 HZ_SMOKE_STRICT="$smoke_strict" bash tests/smoke.sh
+GITHUB_OUTPUT="$smoke_output_file" HZ_SMOKE_STRICT="$smoke_strict" make smoke
 smoke_exit_code=$?
 set -e
 

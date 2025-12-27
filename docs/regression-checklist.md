@@ -6,13 +6,11 @@
 - **脚本语法**：对关键脚本执行 `bash -n`，至少覆盖 `modules/wp` 的标准 WP 安装脚本，按需补充入口脚本（如 `hz.sh`）。
 - **静态扫描**：运行 `shellcheck`（需启用 `-x` 以跟踪引用）覆盖与改动相关的脚本。
 - **Local lint**：
-  - `bash scripts/lint.sh`
-  - `bash scripts/lint.sh --strict`
+  - `make lint`
+  - `make lint-strict`
   - 说明：CI 使用严格模式；本地默认模式在缺少 shellcheck/shfmt 时仅告警并继续。
 - **Local dev (Makefile)**：
   - `make help`
-  - `make lint`
-  - `make lint-strict`
   - `make smoke`
   - `make ci`
 - **禁止词校验**：在脚本的用户输出（`echo` / `printf` 文案）中 grep，确保不含具体云厂商名称；提示关于解析、端口、入站/出站规则需保持中性描述。

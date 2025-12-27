@@ -33,12 +33,12 @@ jobs:
 
       - name: Bash syntax check
         run: |
-          bash scripts/lint.sh
+          make lint
 
       - name: Smoke selftest
         run: |
           set -euo pipefail
-          HZ_SMOKE_SELFTEST=1 bash tests/smoke.sh
+          make smoke-selftest
 
       - name: Smoke gating self-check
         run: |
@@ -54,7 +54,7 @@ jobs:
           HZ_SMOKE_STRICT: "0"
         run: |
           set +e
-          timeout 90s bash tests/smoke.sh
+          make smoke
           code=$?
           code="${code:-1}"
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
