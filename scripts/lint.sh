@@ -26,6 +26,7 @@ fi
 deprecated_helpers=(
   ".github/scripts/lint_bash.sh"
   ".github/scripts/run_ci_locally.sh"
+  "docs/MAINTAINERS_CI.md"
 )
 
 # Keep discovery consistent with CI linting.
