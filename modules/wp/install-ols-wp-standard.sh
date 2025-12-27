@@ -2604,6 +2604,169 @@ apply_wp_site_health_baseline() {
   fi
 }
 
+wp_cli_base() {
+  wp --path="$DOC_ROOT" --allow-root
+}
+
+ensure_lscache_only() {
+  # [ANCHOR:WP_LSCACHE_ONLY]
+  if ! command -v wp >/dev/null 2>&1; then
+    log_warn "未找到 wp-cli，跳过 LiteSpeed Cache 安装/清理。"
+    return
+  fi
+
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    log_warn "未找到站点目录，跳过 LiteSpeed Cache 安装/清理。"
+    return
+  fi
+
+  if ! wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+    log_warn "WordPress 尚未完成安装，跳过插件安装/清理。"
+    return
+  fi
+
+  if ! wp_cli_base plugin install litespeed-cache --activate >/dev/null 2>&1; then
+    log_warn "LiteSpeed Cache 安装/启用失败。"
+  else
+    log_info "LiteSpeed Cache 已安装并启用。"
+  fi
+
+  wp_cli_base plugin delete akismet hello >/dev/null 2>&1 || true
+
+  local plugins plugin
+  plugins="$(wp_cli_base plugin list --field=name --skip-plugins --skip-themes 2>/dev/null)" || plugins=""
+  for plugin in $plugins; do
+    if [ "$plugin" = "litespeed-cache" ]; then
+      continue
+    fi
+    wp_cli_base plugin delete "$plugin" >/dev/null 2>&1 || true
+  done
+}
+
+ensure_wp_cache() {
+  # [ANCHOR:WP_CACHE_ENABLE]
+  if ! command -v wp >/dev/null 2>&1; then
+    log_warn "未找到 wp-cli，跳过 WP_CACHE 设置。"
+    return
+  fi
+
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    log_warn "未找到站点目录，跳过 WP_CACHE 设置。"
+    return
+  fi
+
+  if [ ! -f "${DOC_ROOT}/wp-config.php" ]; then
+    log_warn "未找到 wp-config.php，跳过 WP_CACHE 设置。"
+    return
+  fi
+
+  if wp_cli_base config set WP_CACHE true --raw >/dev/null 2>&1; then
+    log_info "已设置 WP_CACHE=true。"
+  else
+    log_warn "WP_CACHE 设置失败。"
+  fi
+}
+
+ensure_wp_fonts_dir() {
+  # [ANCHOR:WP_FONTS_DIR]
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    log_warn "未找到站点目录，跳过 fonts 目录创建。"
+    return
+  fi
+
+  local wp_content="${DOC_ROOT}/wp-content"
+  local fonts_dir="${wp_content}/uploads/fonts"
+  local owner_group=""
+
+  if [ -d "$wp_content" ]; then
+    owner_group="$(stat -c '%u:%g' "$wp_content" 2>/dev/null || true)"
+  fi
+
+  install -d -m 0755 "$fonts_dir"
+
+  if [ -n "$owner_group" ]; then
+    chown "$owner_group" "$fonts_dir" || true
+  fi
+
+  log_info "已确保 fonts 目录存在：${fonts_dir}"
+}
+
+resolve_default_theme_slug() {
+  local year
+  year="$(date +%Y)"
+  case "$year" in
+    2025) printf "twentytwentyfive" ;;
+    2026) printf "twentytwentysix" ;;
+    *) printf "" ;;
+  esac
+}
+
+ensure_default_theme_policy() {
+  # [ANCHOR:WP_DEFAULT_THEME_POLICY]
+  if ! command -v wp >/dev/null 2>&1; then
+    log_warn "未找到 wp-cli，跳过默认主题设置。"
+    return
+  fi
+
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    log_warn "未找到站点目录，跳过默认主题设置。"
+    return
+  fi
+
+  if ! wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+    log_warn "WordPress 尚未完成安装，跳过默认主题设置。"
+    return
+  fi
+
+  local target_theme fallback_theme selected_theme
+  local installed_themes theme
+
+  target_theme="$(resolve_default_theme_slug)"
+
+  if [ -n "$target_theme" ]; then
+    if wp_cli_base theme install "$target_theme" --activate >/dev/null 2>&1; then
+      selected_theme="$target_theme"
+    else
+      log_warn "默认主题 ${target_theme} 安装/启用失败，尝试回退已安装主题。"
+    fi
+  fi
+
+  installed_themes="$(wp_cli_base theme list --field=name --skip-plugins --skip-themes 2>/dev/null)" || installed_themes=""
+  if [ -z "$selected_theme" ]; then
+    fallback_theme="$(printf '%s\n' "$installed_themes" | awk '/^twentytwenty/ {print}' | sort -V | tail -n1)"
+    if [ -n "$fallback_theme" ]; then
+      if wp_cli_base theme activate "$fallback_theme" >/dev/null 2>&1; then
+        selected_theme="$fallback_theme"
+      else
+        log_warn "默认主题回退激活失败：${fallback_theme}"
+      fi
+    else
+      log_warn "未找到可用的 Twenty* 主题，跳过默认主题设置。"
+      return
+    fi
+  fi
+
+  for theme in $installed_themes; do
+    if [[ "$theme" != twentytwenty* ]]; then
+      continue
+    fi
+    if [ "$theme" = "$selected_theme" ]; then
+      continue
+    fi
+    wp_cli_base theme delete "$theme" >/dev/null 2>&1 || true
+  done
+
+  log_info "默认主题已设置为 ${selected_theme}。"
+}
+
+apply_wp_lomp_baseline() {
+  # [ANCHOR:WP_LOMP_BASELINE]
+  ensure_lscache_only
+  ensure_wp_cache
+  ensure_wp_fonts_dir
+  ensure_default_theme_policy
+}
+
 random_wp_salt() {
   local salt=""
 
@@ -3773,6 +3936,7 @@ install_frontend_only_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  apply_wp_lomp_baseline
   run_loopback_preflight
   print_summary
   print_site_size_limit_summary
@@ -3841,6 +4005,7 @@ install_standard_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  apply_wp_lomp_baseline
   run_loopback_preflight
   print_summary
   print_site_size_limit_summary
@@ -4141,6 +4306,7 @@ install_hub_flow() {
   fix_permissions
   env_self_check
   configure_ssl
+  apply_wp_lomp_baseline
   run_loopback_preflight
   print_summary
   print_hub_summary
