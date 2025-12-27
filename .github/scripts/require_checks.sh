@@ -14,7 +14,8 @@ REQUIRED_CHECK_RUNS=("shell-ci")
 SCHEDULE_ONLY_WORKFLOWS=("Full Regression")
 
 contains_name() {
-  local needle="$1"; shift
+  local needle="$1"
+  shift
   local item
   for item in "$@"; do
     if [[ "$item" == "$needle" ]]; then
@@ -44,7 +45,7 @@ summarize_entries() {
         conclusion_summary="$conclusion"
         ok="false"
       fi
-    done <<< "$entries"
+    done <<<"$entries"
   fi
 
   printf '%s|%s|%s\n' "$status_summary" "$conclusion_summary" "$ok"
@@ -110,7 +111,7 @@ while [[ $# -gt 0 ]]; do
       SELF_TEST="true"
       shift
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -193,7 +194,7 @@ if [[ -n "$suite_failures" ]]; then
   while IFS= read -r failure; do
     [[ -n "$failure" ]] || continue
     blocked_reasons+=("Check suite failure: $failure")
-  done <<< "$suite_failures"
+  done <<<"$suite_failures"
 fi
 
 if (( ${#blocked_reasons[@]} > 0 )); then

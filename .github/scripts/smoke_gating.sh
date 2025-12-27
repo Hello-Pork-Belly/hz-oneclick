@@ -21,7 +21,7 @@ normalize_strict() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   case "${value,,}" in
-    1|true|yes|on)
+    1 | true | yes | on)
       printf 'true'
       ;;
     *)
@@ -97,7 +97,7 @@ enforce() {
   strict="$(normalize_strict "$strict_raw")"
 
   case "$exit_code_raw" in
-    ''|*[!0-9]*)
+    '' | *[!0-9]*)
       exit_code=1
       ;;
     *)
@@ -126,7 +126,7 @@ enforce() {
   fi
 
   case "$verdict" in
-    PASS|OK)
+    PASS | OK)
       return 0
       ;;
     WARN)
@@ -135,7 +135,7 @@ enforce() {
       fi
       return 0
       ;;
-    FAIL|*)
+    FAIL | *)
       return 1
       ;;
   esac
@@ -222,7 +222,7 @@ main() {
             report_json_path="${2:-}"
             shift 2
             ;;
-          -h|--help)
+          -h | --help)
             usage
             exit 0
             ;;
