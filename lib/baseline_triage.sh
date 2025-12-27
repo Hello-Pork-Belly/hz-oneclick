@@ -718,7 +718,7 @@ baseline_triage__write_json_report() {
 baseline_triage_run() {
   # Usage: baseline_triage_run "<domain>" "<lang>" "[format|--format <val>|--format=<val>]" "[--smoke|--exit0|--no-fail]"
   local domain lang format ts overall verdict_reason key_line report_path report_json_path summary_output details_output header_text safe_domain
-  local smoke_mode errexit_set format_arg format_set
+  local smoke_mode errexit_set format_arg format_set report_dir
   local -a triage_args
   domain="$1"
   lang="$(baseline_triage__normalize_lang "$2")"
@@ -759,6 +759,7 @@ baseline_triage_run() {
   report_json_path=""
   smoke_mode=0
   errexit_set=0
+  report_dir=""
 
   BASELINE_LAST_REPORT_PATH=""
   BASELINE_LAST_REPORT_JSON_PATH=""
@@ -813,7 +814,18 @@ baseline_triage_run() {
 
   ts="$(baseline_triage__timestamp)"
   safe_domain="${domain//[^A-Za-z0-9._-]/_}"
-  report_path="/tmp/hz-baseline-triage-${safe_domain}-${ts}.txt"
+
+  if [ "$smoke_mode" -eq 1 ]; then
+    if [ -z "${HZ_SMOKE_REPORT_DIR:-}" ]; then
+      HZ_SMOKE_REPORT_DIR="$(mktemp -d -t hz-smoke-XXXXXXXX)"
+      export HZ_SMOKE_REPORT_DIR
+    fi
+    report_dir="$HZ_SMOKE_REPORT_DIR"
+    mkdir -p "$report_dir"
+    report_path="${report_dir}/smoke-report.txt"
+  else
+    report_path="/tmp/hz-baseline-triage-${safe_domain}-${ts}.txt"
+  fi
 
   header_text="=== HZ Quick Triage Report ===\nTIMESTAMP: ${ts}\nDOMAIN: ${domain}\nLANG: ${lang}\n"
   umask 077
@@ -828,7 +840,11 @@ baseline_triage_run() {
   key_line="$(printf "%s" "$key_line" | baseline_triage__sanitize_text)"
 
   if [ "$format" = "json" ]; then
-    report_json_path="/tmp/hz-baseline-triage-${safe_domain}-${ts}.json"
+    if [ -n "$report_dir" ]; then
+      report_json_path="${report_dir}/smoke-report.json"
+    else
+      report_json_path="/tmp/hz-baseline-triage-${safe_domain}-${ts}.json"
+    fi
     baseline_triage__write_json_report "$domain" "$lang" "$ts" "$overall" "$report_json_path" "$report_path"
   fi
 

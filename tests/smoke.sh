@@ -24,6 +24,7 @@ fi
 if [ -z "${HZ_SMOKE_REPORT_DIR:-}" ]; then
   HZ_SMOKE_REPORT_DIR="$(mktemp -d -t hz-smoke-XXXXXXXX)"
 fi
+export HZ_SMOKE_REPORT_DIR
 mkdir -p "$HZ_SMOKE_REPORT_DIR"
 smoke_report_dir="$HZ_SMOKE_REPORT_DIR"
 smoke_report_path="$smoke_report_dir/smoke-report.txt"
@@ -77,6 +78,29 @@ smoke_normalize_verdict() {
   else
     printf 'FAIL'
   fi
+}
+
+smoke_sync_report_path() {
+  local parsed target
+  parsed="$1"
+  target="$2"
+
+  if [ -z "$parsed" ]; then
+    printf '%s' "$target"
+    return 0
+  fi
+
+  if [ -n "${HZ_SMOKE_REPORT_DIR:-}" ]; then
+    mkdir -p "$HZ_SMOKE_REPORT_DIR"
+    if [ "$parsed" != "$target" ]; then
+      if [ -f "$parsed" ]; then
+        cp "$parsed" "$target"
+      fi
+      parsed="$target"
+    fi
+  fi
+
+  printf '%s' "$parsed"
 }
 
 smoke_determine_exit() {
@@ -273,10 +297,10 @@ update_smoke_verdict_from_output() {
   if [ "$(smoke_verdict_rank "$parsed_verdict")" -ge "$(smoke_verdict_rank "$smoke_verdict")" ]; then
     smoke_verdict="$parsed_verdict"
     if [ -n "$parsed_report" ]; then
-      smoke_report_path="$parsed_report"
+      smoke_report_path="$(smoke_sync_report_path "$parsed_report" "$smoke_report_path")"
     fi
     if [ -n "$parsed_report_json" ]; then
-      smoke_report_json_path="$parsed_report_json"
+      smoke_report_json_path="$(smoke_sync_report_path "$parsed_report_json" "$smoke_report_json_path")"
     fi
   fi
 }
