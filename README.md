@@ -59,7 +59,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick
 
 ## CI 说明
 
-CI 与 GitHub Actions/self-hosted runners 仅供维护者与验证使用，公开用户通过 curl 安装时不需要配置任何 runner。维护者说明见 `docs/MAINTAINERS_CI.md`。
+CI 与 GitHub Actions/self-hosted runners 仅供维护者与验证使用，公开用户通过 curl 安装时不需要配置任何 runner。维护者说明见 `docs/CONTRIBUTING.md` 的 Maintainers / CI notes 章节。
 
 Smoke 在本地或 CI 中会在临时目录生成 `smoke-report.txt` 与 `smoke-report.json`；CI 会上传 `smoke-triage-reports` artifact 供排查。
 

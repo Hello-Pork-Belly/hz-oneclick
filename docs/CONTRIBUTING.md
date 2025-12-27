@@ -17,6 +17,13 @@ From the repo root:
 - `make smoke` — CI-safe smoke test entrypoint
 - `make ci` — run lint-strict then smoke
 
+## Repo hygiene / anti-bloat
+
+- Canonical entrypoints are Makefile targets and `scripts/lint.sh` + `scripts/ci_local.sh`.
+- Do not add new helper scripts unless strictly necessary; prefer Makefile targets.
+- Do not re-introduce deprecated helper paths under `.github/scripts` unless required by workflows.
+- `scripts/lint.sh` enforces deprecated helper references as an anti-regression guard; keep new changes aligned with that wording.
+
 ## Smoke artifacts
 The smoke runner (`tests/smoke.sh`) writes report files for quick triage:
 - Text report: `smoke-report.txt`
@@ -25,3 +32,92 @@ The smoke runner (`tests/smoke.sh`) writes report files for quick triage:
 By default, these are created under a temp directory such as `/tmp/hz-smoke-XXXXXXXX/`. You can also override the directory by setting `HZ_SMOKE_REPORT_DIR` before running `make smoke`.
 
 In CI, the smoke step uploads artifacts named `smoke-triage-reports`, which include the text/JSON reports plus any `/tmp/hz-baseline-triage-*.txt` and `/tmp/hz-baseline-triage-*.json` files produced by the smoke suite.
+
+## Maintainers / CI notes
+
+> Maintainers only. End users installing via curl do **not** need any CI or runner setup.
+
+### Public installer endpoint
+
+- Public install uses `https://sh.horizontech.eu.org` (served as a bash script).
+- CI verifies the public endpoint in non-strict mode on GitHub-hosted runners; no self-hosted runner is needed.
+- Maintainers can run the manual **Verify Public Installer (Strict)** workflow to validate reachability/content.
+  - Default target URL: `https://sh.horizontech.eu.org`.
+  - The workflow runs `HZ_PUBLIC_INSTALLER_STRICT=1` and fails if the download is blocked or invalid.
+- Note: `curl ... | head` or `curl ... | grep -q` can emit `curl: (23) Failure writing output to destination` because the downstream command closes the pipe early. This is expected.
+  Prefer downloading to a file first, then inspect/grep to avoid the warning:
+
+```bash
+tmp=/tmp/hz-installer.sh
+curl -fsSL https://sh.horizontech.eu.org -o "$tmp"
+head -n 5 "$tmp"
+grep -n "sh\\.horizontech\\.page" "$tmp" && echo "BAD" || echo "OK"
+```
+
+### Run CI checks locally
+
+Prerequisites: bash, grep, curl (optional: shellcheck, shfmt).
+
+```bash
+make ci
+```
+
+```bash
+make lint
+```
+
+```bash
+bash .github/scripts/smoke_gating.sh self-test
+```
+
+For parity logs on real machines, you can also run:
+
+```bash
+bash scripts/ci_local.sh
+```
+
+### Real-machine E2E (self-hosted)
+
+- Runner labels must include:
+  - x64: `self-hosted`, `linux`, `x64`, `hz-e2e-x64`
+  - arm64: `self-hosted`, `linux`, `arm64`, `hz-e2e-arm64`
+- Trigger the `E2E Self-hosted` workflow via `workflow_dispatch` and set inputs:
+  - `mode`: `preflight` (default, non-destructive) or `install`
+  - `confirm_install`: must be exactly `I_UNDERSTAND_THIS_WILL_MODIFY_THE_MACHINE` to allow `mode=install`
+  - `smoke_strict`: toggle strict smoke gating (maps to `HZ_SMOKE_STRICT`)
+  - `notes`: optional run notes (printed to logs)
+- Safety model: defaults to preflight checks only; install mode is blocked unless the confirmation string is provided.
+- Intended for dedicated test machines only.
+- Validates the same local CI parity checks via `scripts/ci_local.sh` on real machines.
+
+### PR Smoke（快速检查）
+
+- 触发方式：`pull_request` / `push`。
+- 执行内容：`tests/smoke.sh`（强制开启 smoke 模式，带超时，避免挂起）。
+- 本地运行（模拟 CI smoke）：
+
+```bash
+HZ_CI_SMOKE=1 bash tests/smoke.sh
+```
+
+- 可选环境变量：`HZ_SMOKE_STRICT=1` 将 WARN 视为失败（默认 0）。
+- `tests/smoke.sh` 的退出码语义：
+  - `VERDICT=PASS` ➜ exit 0
+  - `VERDICT=WARN` ➜ `HZ_SMOKE_STRICT=0` 时 exit 0，`HZ_SMOKE_STRICT=1` 时 exit 1
+  - `VERDICT=FAIL` ➜ exit 1
+  - verdict 缺失/未知或出现内部错误 ➜ exit 2
+- PR smoke 出现 WARN 会在 GitHub Actions 中生成 warning annotation（默认不失败）。
+- PR smoke 在 WARN/FAIL 或步骤失败时会在 Actions 的 Artifacts 中上传 `smoke-triage-reports`，包含 `/tmp/hz-baseline-triage-*.txt` 和 `/tmp/hz-baseline-triage-*.json`。
+
+### Full Regression（完整回归）
+
+- 触发方式：手动触发 `Full Regression` 工作流（`workflow_dispatch`），以及每周定时（默认每周一凌晨）。
+- 执行内容：`tests/full_regression.sh`（完整 baseline 回归 + quick triage JSON）。
+- 本地运行：
+
+```bash
+CI=false BASELINE_TEST_MODE=1 HZ_TRIAGE_TEST_MODE=1 bash tests/full_regression.sh
+```
+
+- 全量回归默认 `HZ_SMOKE_STRICT=1`，WARN 会直接失败并触发上传。
+- 失败、WARN 或步骤失败时会上传 `artifacts/full-regression/` 以及 `/tmp/hz-baseline-triage-*.json|.txt`，用于回归排查。
