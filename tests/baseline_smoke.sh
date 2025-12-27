@@ -233,16 +233,18 @@ else
     run_step "baseline_lsws_run" baseline_lsws_run "" "en"
   fi
   if declare -F baseline_cache_run >/dev/null 2>&1; then
-    run_step "baseline_cache_run" bash -c '
-      tmp_wp="$(mktemp -d)"
-      mkdir -p "$tmp_wp/wp-content"
-      cat > "$tmp_wp/wp-config.php" <<'"'"'EOF'"'"'
+    cache_cmd=$(cat <<'BASH'
+tmp_wp="$(mktemp -d)"
+mkdir -p "$tmp_wp/wp-content"
+cat > "$tmp_wp/wp-config.php" <<'EOF'
 <?php
 define('WP_CACHE', true);
 EOF
-      baseline_cache_run "$tmp_wp" "en"
-      rm -rf "$tmp_wp"
-    '
+baseline_cache_run "$tmp_wp" "en"
+rm -rf "$tmp_wp"
+BASH
+    )
+    run_step "baseline_cache_run" bash -c "$cache_cmd"
   fi
   if declare -F baseline_sys_run >/dev/null 2>&1; then
     run_step "baseline_sys_run" baseline_sys_run "en"
