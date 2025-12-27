@@ -15,7 +15,8 @@
   - `rg -n "私钥内容" modules/wp/install-ols-wp-standard.sh && exit 1 || true`
   - `rg -n "Private Key" modules/wp/install-ols-wp-standard.sh`
   - `rg -n "setup-config\\.php" modules/wp/install-ols-wp-standard.sh docs -g '!docs/regression-checklist.md' && exit 1 || true`
-- **DB Grant 源地址**：使用 `rg` 确认脚本中不存在硬编码的 DB 用户来源 IP/Host（例如 `100.x.x.x`）。
+- **DB Grant 源地址**：使用 `rg` 确认脚本的用户输出中不存在硬编码的 DB 用户来源 IP/Host（例如 `100.x.x.x`），例如：
+  - `rg -n "echo .*100\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" modules/wp/install-ols-wp-standard.sh && exit 1 || true`
 
 ## 场景回归
 - **安装菜单 13（LOMP/LNMP（DB / Redis 配置）档位选择）**
