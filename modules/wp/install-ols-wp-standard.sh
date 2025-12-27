@@ -2645,11 +2645,6 @@ ensure_lscache_only() {
 
 ensure_wp_cache() {
   # [ANCHOR:WP_CACHE_ENABLE]
-  if ! command -v wp >/dev/null 2>&1; then
-    log_warn "未找到 wp-cli，跳过 WP_CACHE 设置。"
-    return
-  fi
-
   if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
     log_warn "未找到站点目录，跳过 WP_CACHE 设置。"
     return
@@ -2660,11 +2655,19 @@ ensure_wp_cache() {
     return
   fi
 
-  if wp_cli_base config set WP_CACHE true --raw >/dev/null 2>&1; then
-    log_info "已设置 WP_CACHE=true。"
+  if command -v wp >/dev/null 2>&1; then
+    if wp_cli_base config set WP_CACHE true --raw >/dev/null 2>&1; then
+      log_info "已设置 WP_CACHE=true。"
+      return
+    fi
+
+    log_warn "wp-cli 写入 WP_CACHE 失败，尝试直接更新 wp-config.php。"
   else
-    log_warn "WP_CACHE 设置失败。"
+    log_warn "未找到 wp-cli，尝试直接更新 wp-config.php。"
   fi
+
+  update_wp_config_define "${DOC_ROOT}/wp-config.php" "WP_CACHE" "true" "raw"
+  log_info "已写入 WP_CACHE=true（fallback）。"
 }
 
 ensure_wp_fonts_dir() {
@@ -2689,6 +2692,63 @@ ensure_wp_fonts_dir() {
   fi
 
   log_info "已确保 fonts 目录存在：${fonts_dir}"
+}
+
+ensure_lsphp_imagick() {
+  # [ANCHOR:WP_IMAGICK]
+  local php_bin pkg_suffix imagick_pkg
+  local modules
+  local missing=()
+
+  php_bin="$(detect_lsphp_bin 2>/dev/null || true)"
+  if [ -z "$php_bin" ] || [[ "$php_bin" != /usr/local/lsws/lsphp*/bin/php ]]; then
+    log_warn "未检测到 LSPHP，可用 Imagick 安装已跳过。"
+    return
+  fi
+
+  pkg_suffix="$(get_lsphp_pkg_suffix "$php_bin")"
+  imagick_pkg="lsphp${pkg_suffix}-imagick"
+
+  modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || modules=""
+  if printf '%s\n' "$modules" | grep -qx "imagick"; then
+    return
+  fi
+
+  if command -v dpkg >/dev/null 2>&1; then
+    if ! dpkg -l | grep -q "^ii[[:space:]]\\+${imagick_pkg}[[:space:]]"; then
+      missing+=("$imagick_pkg")
+    fi
+    if ! dpkg -l | grep -q "^ii[[:space:]]\\+imagemagick[[:space:]]"; then
+      missing+=("imagemagick")
+    fi
+  else
+    missing+=("$imagick_pkg" "imagemagick")
+  fi
+
+  if [ "${#missing[@]}" -eq 0 ]; then
+    return
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log_warn "未检测到 apt-get，Imagick 安装已跳过。"
+    return
+  fi
+
+  log_info "尝试安装 Imagick 扩展（${missing[*]}）..."
+  if ! apt-get update -qq; then
+    log_warn "apt-get update 失败，Imagick 安装可能无法完成。"
+  fi
+
+  if ! apt-get install -y "${missing[@]}"; then
+    log_warn "Imagick 安装失败，跳过。"
+    return
+  fi
+
+  if systemctl restart lsws >/dev/null 2>&1; then
+    log_info "OpenLiteSpeed 已重启以加载 Imagick。"
+  else
+    log_warn "OpenLiteSpeed 重启失败，请手动检查。"
+  fi
 }
 
 resolve_default_theme_slug() {
@@ -2761,10 +2821,13 @@ ensure_default_theme_policy() {
 
 apply_wp_lomp_baseline() {
   # [ANCHOR:WP_LOMP_BASELINE]
+  # [ANCHOR:WP_BASELINE_START]
   ensure_lscache_only
   ensure_wp_cache
   ensure_wp_fonts_dir
+  ensure_lsphp_imagick
   ensure_default_theme_policy
+  # [ANCHOR:WP_BASELINE_END]
 }
 
 random_wp_salt() {
