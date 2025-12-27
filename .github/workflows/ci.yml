@@ -31,9 +31,9 @@ jobs:
         run: |
           bash .github/scripts/install_ci_tools.sh
 
-      - name: Bash syntax check
+      - name: Lint (strict)
         run: |
-          bash .github/scripts/lint_bash.sh
+          bash scripts/lint.sh --strict
 
       - name: Smoke selftest
         run: |

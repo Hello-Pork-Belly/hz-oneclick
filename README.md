@@ -43,7 +43,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick
 
 ## CI 说明
 
-CI 与 GitHub Actions/self-hosted runners 仅供维护者与验证使用，公开用户通过 curl 安装时不需要配置任何 runner。维护者说明见 `docs/MAINTAINERS_CI.md`。
+CI 与 GitHub Actions/self-hosted runners 仅供维护者与验证使用，公开用户通过 curl 安装时不需要配置任何 runner。维护者说明见 `docs/CONTRIBUTING.md` 的 Maintainer CI notes。
 
 ## Sensitive docs policy
 

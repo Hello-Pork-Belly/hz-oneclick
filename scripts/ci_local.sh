@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 install_status="SKIP"
 integrity_status=1
@@ -15,6 +15,7 @@ enforce_status=1
 enforce_verdict="FAIL"
 enforce_strict="false"
 smoke_strict="${HZ_SMOKE_STRICT:-0}"
+lint_strict="${HZ_LINT_STRICT:-0}"
 
 echo "==> CI parity runner (local)"
 cd "$repo_root"
@@ -50,7 +51,11 @@ set -e
 echo ""
 echo "==> Bash lint"
 set +e
-bash .github/scripts/lint_bash.sh
+lint_args=()
+if [ "$lint_strict" = "1" ]; then
+  lint_args+=(--strict)
+fi
+bash scripts/lint.sh "${lint_args[@]}"
 lint_status=$?
 set -e
 
@@ -108,9 +113,9 @@ else
   echo "- repo_integrity: FAIL (exit=${integrity_status})"
 fi
 if [ "$lint_status" -eq 0 ]; then
-  echo "- lint_bash: PASS"
+  echo "- lint: PASS"
 else
-  echo "- lint_bash: FAIL (exit=${lint_status})"
+  echo "- lint: FAIL (exit=${lint_status})"
 fi
 if [ "$selftest_status" -eq 0 ]; then
   echo "- smoke_selftest: PASS"

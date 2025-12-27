@@ -15,12 +15,12 @@ for arg in "$@"; do
   esac
 done
 
-if [[ ! -f .github/scripts/lint_bash.sh ]]; then
+if [[ ! -f hz.sh ]]; then
   echo "ERROR: scripts/lint.sh must be run from the repository root"
   exit 1
 fi
 
-# Keep discovery consistent with CI linting (.github/scripts/lint_bash.sh).
+# Keep discovery consistent with CI linting.
 mapfile -d '' -t files < <(find ./modules ./tests ./.github/scripts -type f -name '*.sh' -print0)
 
 script_count=${#files[@]}
