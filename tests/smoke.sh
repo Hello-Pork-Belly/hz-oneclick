@@ -21,6 +21,16 @@ if command -v timeout >/dev/null 2>&1; then
   timeout_available=1
 fi
 
+if [ -z "${HZ_SMOKE_REPORT_DIR:-}" ]; then
+  HZ_SMOKE_REPORT_DIR="$(mktemp -d -t hz-smoke-XXXXXXXX)"
+fi
+mkdir -p "$HZ_SMOKE_REPORT_DIR"
+smoke_report_dir="$HZ_SMOKE_REPORT_DIR"
+smoke_report_path="$smoke_report_dir/smoke-report.txt"
+smoke_report_json_path="$smoke_report_dir/smoke-report.json"
+: > "$smoke_report_path"
+: > "$smoke_report_json_path"
+
 run_with_timeout() {
   local duration="30s"
   if [ $# -gt 0 ] && [[ "$1" =~ ^[0-9]+[smhd]?$ ]]; then
@@ -225,8 +235,6 @@ if [ "${HZ_SMOKE_SELFTEST:-}" = "1" ]; then
 fi
 
 smoke_verdict="PASS"
-smoke_report_path=""
-smoke_report_json_path=""
 
 # shellcheck source=/dev/null
 . ./lib/baseline_triage.sh
