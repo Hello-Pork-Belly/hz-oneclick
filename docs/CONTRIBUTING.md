@@ -1,6 +1,7 @@
 # Contributing
 
 This repo keeps local developer checks aligned with CI. Use the Makefile targets below to run the same lint/smoke commands locally.
+Canonical commands are Makefile targets and `scripts/lint.sh` / `scripts/ci_local.sh`. Do not reference deprecated helpers.
 
 ## Prereqs
 - bash

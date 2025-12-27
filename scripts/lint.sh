@@ -23,6 +23,11 @@ if [[ ! -d "$repo_root/.github" ]]; then
   exit 1
 fi
 
+deprecated_helpers=(
+  ".github/scripts/lint_bash.sh"
+  ".github/scripts/run_ci_locally.sh"
+)
+
 # Keep discovery consistent with CI linting.
 mapfile -d '' -t files < <(find ./modules ./tests ./.github/scripts -type f -name '*.sh' -print0)
 
@@ -96,13 +101,55 @@ else
 fi
 
 echo ""
-echo "Summary: bash -n=${bash_status} shellcheck=${shellcheck_status} shfmt=${shfmt_status}"
+echo "==> deprecated helper references"
+deprecated_status=0
+deprecated_matches=""
+if command -v rg >/dev/null 2>&1; then
+  for deprecated in "${deprecated_helpers[@]}"; do
+    set +e
+    match_output="$(git ls-files -z -- ':!scripts/lint.sh' | xargs -0 rg -n -H --fixed-strings -e "$deprecated")"
+    status=$?
+    set -e
+    if [[ $status -eq 0 ]]; then
+      deprecated_status=1
+      deprecated_matches+=$'Deprecated reference found:\n'"${match_output}"$'\n'
+    fi
+  done
+else
+  for deprecated in "${deprecated_helpers[@]}"; do
+    set +e
+    match_output="$(git ls-files -z -- ':!scripts/lint.sh' | xargs -0 grep -n -H -F -- "$deprecated")"
+    status=$?
+    set -e
+    if [[ $status -eq 0 ]]; then
+      deprecated_status=1
+      deprecated_matches+=$'Deprecated reference found:\n'"${match_output}"$'\n'
+    fi
+  done
+fi
+
+if [[ $deprecated_status -ne 0 ]]; then
+  if [[ $strict -eq 1 ]]; then
+    echo "ERROR: Deprecated helper references detected."
+  else
+    echo "WARN: Deprecated helper references detected."
+  fi
+  echo "Use Makefile targets or scripts/lint.sh and scripts/ci_local.sh instead."
+  echo ""
+  printf "%s" "$deprecated_matches"
+fi
+
+echo ""
+echo "Summary: bash -n=${bash_status} shellcheck=${shellcheck_status} shfmt=${shfmt_status} deprecated_refs=${deprecated_status}"
 
 if [[ $strict -eq 1 ]]; then
   if [[ $shellcheck_status -ne 0 ]]; then
     exit 1
   fi
   if [[ $shfmt_status -ne 0 ]]; then
+    exit 1
+  fi
+  if [[ $deprecated_status -ne 0 ]]; then
     exit 1
   fi
 fi
