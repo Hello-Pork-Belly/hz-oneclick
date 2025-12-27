@@ -41,9 +41,27 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick
 - 合并前必须通过 CI 检查。
 - PR 描述需严格按照模板填写，并确保 Summary、Testing 等必填项完整。
 
+## 本地开发快速入口（canonical entrypoints）
+
+使用 Makefile 作为本地执行入口（canonical entrypoints）：
+
+- `make help`
+- `make lint`
+- `make lint-strict`（需要 shellcheck/shfmt；CI 会安装）
+- `make smoke`
+- `make ci`
+
+规则：Use Makefile targets and `scripts/lint.sh`/`scripts/ci_local.sh`; do not reference deprecated CI helpers.
+
+## 贡献指南
+
+贡献说明请见 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)。
+
 ## CI 说明
 
 CI 与 GitHub Actions/self-hosted runners 仅供维护者与验证使用，公开用户通过 curl 安装时不需要配置任何 runner。维护者说明见 `docs/MAINTAINERS_CI.md`。
+
+Smoke 在本地或 CI 中会在临时目录生成 `smoke-report.txt` 与 `smoke-report.json`；CI 会上传 `smoke-triage-reports` artifact 供排查。
 
 ## Sensitive docs policy
 
