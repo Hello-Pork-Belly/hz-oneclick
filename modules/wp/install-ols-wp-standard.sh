@@ -2670,28 +2670,38 @@ ensure_wp_cache() {
   log_info "已写入 WP_CACHE=true（fallback）。"
 }
 
-ensure_wp_fonts_dir() {
-  # [ANCHOR:WP_FONTS_DIR]
-  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
-    log_warn "未找到站点目录，跳过 fonts 目录创建。"
-    return
+ensure_uploads_fonts_dir() {
+  # [ANCHOR:UPLOADS_FONTS_DIR]
+  local uploads_basedir=""
+  local fonts_dir=""
+
+  if command -v wp >/dev/null 2>&1; then
+    if [ -n "${DOC_ROOT:-}" ] && [ -d "$DOC_ROOT" ]; then
+      if wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+        uploads_basedir="$(wp_cli_base eval 'echo wp_upload_dir()["basedir"];' 2>/dev/null || true)"
+      fi
+    fi
   fi
 
-  local wp_content="${DOC_ROOT}/wp-content"
-  local fonts_dir="${wp_content}/uploads/fonts"
-  local owner_group=""
-
-  if [ -d "$wp_content" ]; then
-    owner_group="$(stat -c '%u:%g' "$wp_content" 2>/dev/null || true)"
+  if [ -z "$uploads_basedir" ]; then
+    if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+      return
+    fi
+    uploads_basedir="${DOC_ROOT}/wp-content/uploads"
   fi
 
-  install -d -m 0755 "$fonts_dir"
+  fonts_dir="${uploads_basedir}/fonts"
 
-  if [ -n "$owner_group" ]; then
-    chown "$owner_group" "$fonts_dir" || true
+  if mkdir -p "$fonts_dir" 2>/dev/null; then
+    if id -u www-data >/dev/null 2>&1; then
+      chown www-data:www-data "$fonts_dir" >/dev/null 2>&1 || true
+    elif id -u nobody >/dev/null 2>&1 && getent group nogroup >/dev/null 2>&1; then
+      chown nobody:nogroup "$fonts_dir" >/dev/null 2>&1 || true
+    fi
+    log_info "已确保 fonts 目录存在：${fonts_dir}"
+  else
+    log_warn "fonts 目录创建失败：${fonts_dir}"
   fi
-
-  log_info "已确保 fonts 目录存在：${fonts_dir}"
 }
 
 ensure_lsphp_imagick() {
@@ -2849,7 +2859,7 @@ apply_wp_lomp_baseline() {
   # [ANCHOR:WP_BASELINE_START]
   ensure_lscache_only
   ensure_wp_cache
-  ensure_wp_fonts_dir
+  ensure_uploads_fonts_dir
   ensure_lsphp_imagick
   ensure_default_theme_policy
   # [ANCHOR:WP_BASELINE_END]
