@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -E
 
 forbidden_terms_b64=(
   "Q2xvdWRmbGFyZQ=="
@@ -118,6 +119,7 @@ export_smoke_env() {
       echo "HZ_SMOKE_VERDICT=${verdict_normalized}"
       echo "HZ_SMOKE_STRICT_EFFECTIVE=${strict_effective}"
       [ -n "$verdict_raw" ] && [ "$verdict_raw" != "$verdict_normalized" ] && echo "HZ_SMOKE_VERDICT_DETAIL=${verdict_raw}"
+      [ -n "$smoke_report_dir" ] && echo "HZ_SMOKE_REPORT_DIR=${smoke_report_dir}"
       [ -n "$smoke_report_path" ] && echo "HZ_SMOKE_REPORT_PATH=${smoke_report_path}"
       [ -n "$smoke_report_json_path" ] && echo "HZ_SMOKE_REPORT_JSON_PATH=${smoke_report_json_path}"
     } >> "$GITHUB_ENV"
@@ -127,12 +129,91 @@ export_smoke_env() {
     {
       echo "HZ_SMOKE_VERDICT=${verdict_normalized}"
       [ -n "$verdict_raw" ] && [ "$verdict_raw" != "$verdict_normalized" ] && echo "HZ_SMOKE_VERDICT_DETAIL=${verdict_raw}"
+      [ -n "$smoke_report_dir" ] && echo "HZ_SMOKE_REPORT_DIR=${smoke_report_dir}"
       [ -n "$smoke_report_path" ] && echo "HZ_SMOKE_REPORT_PATH=${smoke_report_path}"
       [ -n "$smoke_report_json_path" ] && echo "HZ_SMOKE_REPORT_JSON_PATH=${smoke_report_json_path}"
+      [ -n "$smoke_report_dir" ] && echo "smoke_report_dir=${smoke_report_dir}"
       [ -n "$smoke_report_path" ] && echo "smoke_report_path=${smoke_report_path}"
       [ -n "$smoke_report_json_path" ] && echo "smoke_report_json_path=${smoke_report_json_path}"
     } >> "$GITHUB_OUTPUT"
   fi
+}
+
+smoke_write_report_text() {
+  local status reason
+  status="$1"
+  reason="${2:-}"
+  reason="${reason:-n/a}"
+  {
+    echo "HZ Smoke Report"
+    echo "Status: ${status}"
+    echo "Verdict: ${smoke_verdict}"
+    echo "Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    echo "Repo: $(pwd)"
+    echo "CI: ${CI:-}"
+    echo "GITHUB_RUN_ID: ${GITHUB_RUN_ID:-}"
+    echo "GITHUB_RUN_ATTEMPT: ${GITHUB_RUN_ATTEMPT:-}"
+    echo "Reason: ${reason}"
+  } > "$smoke_report_path"
+}
+
+smoke_write_report_json() {
+  local status reason generated_at
+  status="$1"
+  reason="${2:-}"
+  reason="${reason:-n/a}"
+  generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$status" "$generated_at" "$reason" "$smoke_report_path" "$smoke_report_json_path" <<'PY'
+import json
+import sys
+
+status, generated_at, reason, report_path, report_json_path = sys.argv[1:6]
+payload = {
+    "schema_version": "smoke-report/v1",
+    "generated_at": generated_at,
+    "status": status,
+    "reason": reason,
+    "report_path": report_path,
+    "report_json_path": report_json_path,
+}
+print(json.dumps(payload, ensure_ascii=False, indent=2))
+PY
+  else
+    cat <<EOF
+{
+  "schema_version": "smoke-report/v1",
+  "generated_at": "${generated_at}",
+  "status": "${status}",
+  "reason": "${reason}",
+  "report_path": "${smoke_report_path}",
+  "report_json_path": "${smoke_report_json_path}"
+}
+EOF
+  fi
+}
+
+smoke_init_reports() {
+  local run_id attempt
+  run_id="${GITHUB_RUN_ID:-local}"
+  attempt="${GITHUB_RUN_ATTEMPT:-0}"
+  smoke_report_dir="${HZ_SMOKE_REPORT_DIR:-/tmp/hz-smoke--${run_id}-${attempt}}"
+  smoke_report_path="${smoke_report_dir}/smoke-report.txt"
+  smoke_report_json_path="${smoke_report_dir}/smoke-report.json"
+  mkdir -p "$smoke_report_dir"
+  smoke_write_report_text "RUNNING" "initializing"
+  smoke_write_report_json "RUNNING" "initializing" > "$smoke_report_json_path"
+  export_smoke_env 0 "$smoke_verdict"
+}
+
+smoke_capture_error() {
+  local exit_code
+  exit_code="$1"
+  if [ -z "${smoke_failure_reason:-}" ]; then
+    smoke_failure_reason="command failed (exit ${exit_code})"
+  fi
+  smoke_verdict="FAIL"
 }
 
 if [ "${HZ_SMOKE_SELFTEST:-}" = "1" ]; then
@@ -225,8 +306,10 @@ if [ "${HZ_SMOKE_SELFTEST:-}" = "1" ]; then
 fi
 
 smoke_verdict="PASS"
+smoke_report_dir=""
 smoke_report_path=""
 smoke_report_json_path=""
+smoke_failure_reason=""
 
 # shellcheck source=/dev/null
 . ./lib/baseline_triage.sh
@@ -315,6 +398,15 @@ smoke_finalize() {
 
   final_exit="$(smoke_determine_exit "$smoke_verdict" "$strict_effective" "$exit_status")"
 
+  if [ -z "$smoke_failure_reason" ] && [ "$exit_status" -ne 0 ]; then
+    smoke_failure_reason="smoke exited with status ${exit_status}"
+  fi
+  if [ -z "$smoke_failure_reason" ]; then
+    smoke_failure_reason="completed"
+  fi
+  smoke_write_report_text "$smoke_verdict" "$smoke_failure_reason"
+  smoke_write_report_json "$smoke_verdict" "$smoke_failure_reason" > "$smoke_report_json_path"
+
   export_smoke_env "$strict_effective" "$verdict_raw"
   emit_smoke_annotation
 
@@ -325,7 +417,16 @@ smoke_finalize() {
   exit "$final_exit"
 }
 
+trap 'smoke_capture_error $? "$BASH_COMMAND"' ERR
 trap 'smoke_finalize $?' EXIT
+
+smoke_init_reports
+
+if smoke_is_truthy "${HZ_SMOKE_FORCE_FAIL:-}"; then
+  smoke_failure_reason="HZ_SMOKE_FORCE_FAIL=1 requested"
+  smoke_verdict="FAIL"
+  exit 1
+fi
 
 validate_json_file() {
   local json_path expected_group

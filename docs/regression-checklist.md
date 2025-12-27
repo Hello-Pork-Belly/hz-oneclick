@@ -21,6 +21,11 @@
   - `rg -n "setup-config\\.php" modules/wp/install-ols-wp-standard.sh docs -g '!docs/regression-checklist.md' && exit 1 || true`
 - **DB Grant 源地址**：使用 `rg` 确认脚本的用户输出中不存在硬编码的 DB 用户来源 IP/Host（例如 `100.x.x.x`），例如：
   - `rg -n "echo .*100\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" modules/wp/install-ols-wp-standard.sh && exit 1 || true`
+- **Smoke 报告生成**：执行 smoke 脚本并检查报告输出路径（本地默认 `/tmp/hz-smoke--<run_id>-<attempt>/`），例如：
+  - `bash -n tests/smoke.sh tests/baseline_smoke.sh`
+  - `HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 bash tests/smoke.sh`
+  - 报告文件：`smoke-report.txt` / `smoke-report.json` 位于 `/tmp/hz-smoke--<run_id>-<attempt>/`
+  - GitHub Actions 中下载 `smoke-triage-reports` 工件查看报告文件
 
 ## 场景回归
 - **安装菜单 13（LOMP/LNMP（DB / Redis 配置）档位选择）**

@@ -52,6 +52,7 @@ jobs:
         env:
           HZ_CI_SMOKE: "1"
           HZ_SMOKE_STRICT: "0"
+          HZ_SMOKE_REPORT_DIR: "/tmp/hz-smoke--${{ github.run_id }}-${{ github.run_attempt }}"
         run: |
           set +e
           timeout 90s bash tests/smoke.sh
@@ -69,18 +70,20 @@ jobs:
               fi
             }
             ensure_output "HZ_SMOKE_VERDICT" "FAIL"
-            ensure_output "smoke_report_path" "unknown"
-            ensure_output "smoke_report_json_path" "unknown"
+            ensure_output "smoke_report_dir" "${HZ_SMOKE_REPORT_DIR}"
+            ensure_output "smoke_report_path" "${HZ_SMOKE_REPORT_DIR}/smoke-report.txt"
+            ensure_output "smoke_report_json_path" "${HZ_SMOKE_REPORT_DIR}/smoke-report.json"
           fi
           set -e
           exit 0
 
       - name: Upload smoke artifacts
-        if: always() && (steps.smoke.outputs.exit_code != '0' || steps.smoke.outputs.HZ_SMOKE_VERDICT == 'WARN' || steps.smoke.outputs.HZ_SMOKE_VERDICT == 'FAIL')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-triage-reports
           path: |
+            ${{ steps.smoke.outputs.smoke_report_dir }}
             ${{ steps.smoke.outputs.smoke_report_path }}
             ${{ steps.smoke.outputs.smoke_report_json_path }}
             /tmp/hz-baseline-triage-*.txt
@@ -113,6 +116,8 @@ jobs:
             echo "- verdict: ${verdict}"
             echo "- strict: ${strict_enabled}"
             echo "- exit_code: ${exit_code}"
+            echo "- artifacts: smoke-triage-reports (download from workflow run artifacts)"
+            [ -n "${{ steps.smoke.outputs.smoke_report_dir }}" ] && echo "- report_dir: ${{ steps.smoke.outputs.smoke_report_dir }}"
             [ -n "$report_path" ] && echo "- report_path: ${report_path}"
             [ -n "$report_json_path" ] && echo "- report_json_path: ${report_json_path}"
           } >> "$GITHUB_STEP_SUMMARY"
