@@ -40,6 +40,127 @@ baseline_menu_normalize_lang() {
   fi
 }
 
+detect_machine_profile() {
+  local arch vcpu mem_kb mem_mb mem_gb swap_kb swap_mb disk_total_raw disk_avail_raw
+
+  arch="$(uname -m 2>/dev/null || true)"
+  if [ -z "$arch" ]; then
+    arch="N/A"
+  fi
+
+  if command -v nproc >/dev/null 2>&1; then
+    vcpu="$(nproc 2>/dev/null || true)"
+  fi
+  if ! echo "$vcpu" | grep -Eq '^[0-9]+$'; then
+    vcpu="$(lscpu 2>/dev/null | awk -F: '/^CPU\(s\)/{gsub(/ /,"",$2); print $2}' | head -n1)"
+  fi
+  if ! echo "$vcpu" | grep -Eq '^[0-9]+$'; then
+    vcpu="N/A"
+  fi
+
+  mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  if echo "$mem_kb" | grep -Eq '^[0-9]+$'; then
+    mem_mb=$((mem_kb / 1024))
+    mem_gb="$(awk -v kb="$mem_kb" 'BEGIN {printf "%.1f", kb/1024/1024}')"
+  else
+    mem_mb="N/A"
+    mem_gb="N/A"
+  fi
+
+  swap_kb="$(awk '/SwapTotal/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  if echo "$swap_kb" | grep -Eq '^[0-9]+$'; then
+    swap_mb=$((swap_kb / 1024))
+  else
+    swap_mb="N/A"
+  fi
+
+  if command -v df >/dev/null 2>&1; then
+    read -r disk_total_raw disk_avail_raw <<EOF
+$(df -B1 / 2>/dev/null | awk 'NR==2 {print $2, $4}')
+EOF
+  fi
+
+  if echo "$disk_total_raw" | grep -Eq '^[0-9]+$'; then
+    MACHINE_DISK_TOTAL="$(awk -v b="$disk_total_raw" 'BEGIN {printf "%.1f GB", b/1024/1024/1024}')"
+  else
+    MACHINE_DISK_TOTAL="N/A"
+  fi
+
+  if echo "$disk_avail_raw" | grep -Eq '^[0-9]+$'; then
+    MACHINE_DISK_AVAILABLE="$(awk -v b="$disk_avail_raw" 'BEGIN {printf "%.1f GB", b/1024/1024/1024}')"
+  else
+    MACHINE_DISK_AVAILABLE="N/A"
+  fi
+
+  MACHINE_ARCH="$arch"
+  MACHINE_VCPU="$vcpu"
+  MACHINE_MEM_MB="$mem_mb"
+  MACHINE_MEM_GB="$mem_gb"
+  MACHINE_SWAP_MB="$swap_mb"
+}
+
+recommend_machine_tier() {
+  local mem_mb tier_label
+
+  mem_mb="$MACHINE_MEM_MB"
+  if ! echo "$mem_mb" | grep -Eq '^[0-9]+$'; then
+    tier_label="N/A"
+  elif [ "$mem_mb" -lt 4000 ]; then
+    tier_label="Lite（Frontend-only）"
+  elif [ "$mem_mb" -lt 16000 ]; then
+    tier_label="Standard"
+  else
+    tier_label="Hub"
+  fi
+
+  MACHINE_RECOMMENDED_TIER="$tier_label"
+}
+
+print_machine_profile_and_recommendation() {
+  local mem_display swap_display disk_display
+
+  detect_machine_profile
+  recommend_machine_tier
+
+  if [ "$MACHINE_MEM_GB" = "N/A" ]; then
+    mem_display="N/A"
+  else
+    mem_display="${MACHINE_MEM_MB} MB (${MACHINE_MEM_GB} GB)"
+  fi
+
+  if [ "$MACHINE_SWAP_MB" = "N/A" ]; then
+    swap_display="N/A"
+  else
+    swap_display="${MACHINE_SWAP_MB} MB"
+  fi
+
+  disk_display="total ${MACHINE_DISK_TOTAL} / free ${MACHINE_DISK_AVAILABLE}"
+
+  echo
+  cyan "Baseline: Machine profile"
+  if [ "$HZ_LANG" = "en" ]; then
+    echo "Arch: ${MACHINE_ARCH}"
+    echo "vCPU: ${MACHINE_VCPU}"
+    echo "Total RAM: ${mem_display}"
+    echo "Swap: ${swap_display}"
+    echo "Disk: ${disk_display}"
+  else
+    echo "架构 Arch: ${MACHINE_ARCH}"
+    echo "vCPU 核心: ${MACHINE_VCPU}"
+    echo "内存总量: ${mem_display}"
+    echo "Swap: ${swap_display}"
+    echo "磁盘: ${disk_display}"
+  fi
+
+  cyan "Recommendation"
+  if [ "$HZ_LANG" = "en" ]; then
+    echo "Best tier: ${MACHINE_RECOMMENDED_TIER}"
+  else
+    echo "推荐档位: ${MACHINE_RECOMMENDED_TIER}"
+  fi
+  echo
+}
+
 parse_global_args() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -408,6 +529,7 @@ main_menu() {
           baseline_diagnostics_menu
           ;;
         13)
+          print_machine_profile_and_recommendation
           show_lomp_lnmp_profile_menu
           ;;
         0)
@@ -501,6 +623,7 @@ main_menu() {
           baseline_diagnostics_menu
           ;;
         13)
+          print_machine_profile_and_recommendation
           show_lomp_lnmp_profile_menu
           ;;
         0)
