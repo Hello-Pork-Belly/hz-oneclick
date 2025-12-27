@@ -1550,6 +1550,52 @@ extract_db_host_only() {
   fi
 }
 
+is_tailscale_ipv4() {
+  local ip="${1:-}"
+
+  if [ -z "$ip" ]; then
+    return 1
+  fi
+
+  echo "$ip" | grep -Eq '^100(\.[0-9]{1,3}){3}$'
+}
+
+detect_tailscale_ipv4() {
+  local ts_ip=""
+
+  if command -v tailscale >/dev/null 2>&1; then
+    ts_ip="$(tailscale ip -4 2>/dev/null | head -n1 | tr -d '[:space:]')"
+    if is_tailscale_ipv4 "$ts_ip"; then
+      echo "$ts_ip"
+      return 0
+    fi
+  fi
+
+  ts_ip="$(ip -4 addr show 2>/dev/null | grep -oE '100(\.[0-9]{1,3}){3}' | head -n1)"
+  if is_tailscale_ipv4 "$ts_ip"; then
+    echo "$ts_ip"
+    return 0
+  fi
+
+  return 1
+}
+
+init_suggested_db_grant_host() {
+  local ts_ip=""
+
+  if [ -n "${SUGGESTED_DB_GRANT_HOST:-}" ]; then
+    return 0
+  fi
+
+  if ts_ip="$(detect_tailscale_ipv4)"; then
+    SUGGESTED_DB_GRANT_HOST="$ts_ip"
+    return 0
+  fi
+
+  SUGGESTED_DB_GRANT_HOST="%"
+  return 0
+}
+
 is_local_db_host() {
   local host="${1:-}"
 
@@ -1618,6 +1664,7 @@ prompt_db_user_host() {
 
 prompt_db_info() {
   # [ANCHOR:DB_INFO_PROMPT]
+  init_suggested_db_grant_host
   echo
   echo "================ 数据库设置（必须已在目标 DB 实例中创建） ================"
   echo "请先在你的数据库实例中『手动』创建好："
@@ -1800,7 +1847,7 @@ test_db_connection() {
   if echo "$mysql_err" | grep -qi "Access denied"; then
     log_warn "可能原因：用户名/密码错误，或该用户未被授权从此主机连接。"
     if [ "${LITE_PREFLIGHT_MODE:-0}" -eq 1 ]; then
-      log_warn "常见情况：账号存在但仅允许 'user'@'%' 或 'user'@'<CLIENT_OVERLAY_IP>'，与当前来源不匹配。"
+      log_warn "常见情况：账号存在但仅允许 'user'@'%' 或 'user'@'DB_USER_HOST'，与当前来源不匹配。"
     fi
   elif echo "$mysql_err" | grep -qi "Unknown MySQL server host\|Unknown host"; then
     log_warn "可能原因：DB Host 无法解析，或地址拼写有误。"
@@ -1955,6 +2002,7 @@ EOF
 
 prompt_db_info_lite() {
   # [ANCHOR:DB_INFO_PROMPT_LITE]
+  init_suggested_db_grant_host
   echo
   echo "================ LOMP-Lite（Frontend-only）：外部数据库配置 ================"
   echo "请先在目标 MariaDB/MySQL 实例中『手动』创建好："
@@ -2178,24 +2226,29 @@ print_lite_preflight_summary() {
 
 print_lite_db_host_fix_guide() {
   # [ANCHOR:LITE_DB_HOST_FIX_GUIDE]
+  local suggested_host=""
+
+  init_suggested_db_grant_host
+  suggested_host="${SUGGESTED_DB_GRANT_HOST:-%}"
   echo
-  echo -e "${CYAN}---- DB Host-side Fix Guide（仅供排错参考） ----${NC}"
-  echo "可让 DB 管理员在数据库主机上执行（替换占位符）："
+  echo -e "${CYAN}---- DB host-side fix guide (run on the DB server) ----${NC}"
+  echo "请先确认数据库监听在预期接口/端口（例如 ${DB_HOST}:${DB_PORT}），且防火墙已放行。"
+  echo "建议的 DB_USER_HOST：${suggested_host}（仅供参考，'%' 代表更广泛的来源访问）"
   cat <<EOF
 SQL 模板：
-  CREATE DATABASE IF NOT EXISTS <DB_NAME>;
-  CREATE USER '<DB_USER>'@'${DB_USER_HOST:-%}' IDENTIFIED BY '<DB_PASSWORD>';
-  -- 可选：使用更严格的来源限制（MySQL Host 模式，不支持 CIDR）
-  GRANT ALL PRIVILEGES ON <DB_NAME>.* TO '<DB_USER>'@'${DB_USER_HOST:-%}';
+  CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`;
+  CREATE USER '${DB_USER}'@'${suggested_host}' IDENTIFIED BY '<DB_PASSWORD>';
+  GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${suggested_host}';
   FLUSH PRIVILEGES;
 
 验证：
-  SHOW DATABASES LIKE '<DB_NAME>';
-  SELECT User,Host FROM mysql.user WHERE User='<DB_USER>';
-  SHOW GRANTS FOR '<DB_USER>'@'<HOST>'; -- Host 必须与 mysql.user 实际记录匹配（可能是 %）
+  SHOW DATABASES LIKE '${DB_NAME}';
+  SELECT User,Host FROM mysql.user WHERE User='${DB_USER}';
+  SHOW GRANTS FOR '${DB_USER}'@'<DB_USER_HOST>';
 EOF
   echo
-  echo "Docker MariaDB 提示：容器需发布 3306 端口到预期接口（例如 0.0.0.0 或 <CLIENT_OVERLAY_IP>），并确保防火墙/UFW 放行。"
+  echo "说明：'user'@'%' 与 'user'@'IP' 是不同账号，SHOW GRANTS 的 Host 必须精确匹配。"
+  echo "如使用容器部署数据库，请确认端口已发布到预期接口，并放行防火墙。"
   echo
 }
 
