@@ -5,6 +5,8 @@ set -euo pipefail
 cyan()   { printf '\033[36m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+log_info() { printf '[INFO] %s\n' "$*"; }
+log_warn() { printf '[WARN] %s\n' "$*" >&2; }
 
 HZ_ONECLICK_VERSION="v0.9.x"
 HZ_ONECLICK_BUILD="2025-12-27"
@@ -38,6 +40,34 @@ baseline_menu_normalize_lang() {
   else
     echo "zh"
   fi
+}
+
+run_wp_baseline_verifier() {
+  local site_slug default_doc_root doc_root_input doc_root verifier
+
+  log_info "Verify WordPress baseline"
+  read -rp "Site slug (optional, used for default /var/www/<slug>/html): " site_slug
+  if [ -n "$site_slug" ]; then
+    default_doc_root="/var/www/${site_slug}/html"
+  else
+    default_doc_root="/var/www/<slug>/html"
+  fi
+  read -rp "Site DOC_ROOT [${default_doc_root}]: " doc_root_input
+  doc_root="${doc_root_input:-$default_doc_root}"
+
+  if [ -z "$doc_root" ]; then
+    log_warn "DOC_ROOT is required."
+    return 1
+  fi
+
+  verifier="tools/wp-baseline-verify.sh"
+  if [ ! -f "$verifier" ]; then
+    log_warn "WP baseline verifier not found: ${verifier}"
+    return 1
+  fi
+
+  DOC_ROOT="$doc_root" bash "$verifier"
+  log_info "Also check WP Admin → Tools → Site Health."
 }
 
 detect_machine_profile() {
@@ -468,10 +498,11 @@ main_menu() {
       cyan  "  7) msmtp + Brevo (SMTP alert)"
       green "  8) WP backup (DB + files)"
       cyan  "  9) wp-cron helper (system cron for WordPress)"
-      green  " 10) rkhunter (rootkit / trojan scanner)"
-      cyan  "  11) rkhunter (daily check / optional mail alert)"
-      green " 12) Baseline Diagnostics"
-      cyan  "  13) LOMP/LNMP (DB / Redis provisioning)"
+      green " 10) Verify WP baseline"
+      cyan  "  11) rkhunter (rootkit / trojan scanner)"
+      green " 12) rkhunter (daily check / optional mail alert)"
+      cyan  "  13) Baseline Diagnostics"
+      green " 14) LOMP/LNMP (DB / Redis provisioning)"
       yellow "  0) Exit"
       green "  r) Return to language selection / 返回语言选择 "
       echo
@@ -518,17 +549,21 @@ main_menu() {
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/gen-wp-cron-en.sh")
           ;;
         10)
+          run_wp_baseline_verifier
+          read -rp "Done. Press Enter to return to menu..." _
+          ;;
+        11)
           echo "Installing rkhunter (rootkit / trojan scanner) ..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/install-rkhunter-en.sh")
           ;;
-        11)
+        12)
           echo "rkhunter (setting / optional mail alert)) ..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron-en.sh")
           ;;
-        12)
+        13)
           baseline_diagnostics_menu
           ;;
-        13)
+        14)
           print_machine_profile_and_recommendation
           show_lomp_lnmp_profile_menu
           ;;
@@ -562,10 +597,11 @@ main_menu() {
       cyan  "  7) 邮件报警（msmtp + Brevo）"
       green "  8) WordPress 备份（数据库 + 文件）"
       cyan  "  9) wp-cron 定时任务向导"
-      green "  10) rkhunter（系统后门 / 木马检测）"
-      cyan  "  11) rkhunter 定时扫描(报错邮件通知 /日志维护）"
-      green "  12) 基础诊断（Baseline Diagnostics）"
-      cyan  "  13) LOMP/LNMP（DB / Redis 配置）"
+      green "  10) 验证 WordPress 基线"
+      cyan  "  11) rkhunter（系统后门 / 木马检测）"
+      green "  12) rkhunter 定时扫描(报错邮件通知 /日志维护）"
+      cyan  "  13) 基础诊断（Baseline Diagnostics）"
+      green "  14) LOMP/LNMP（DB / Redis 配置）"
       yellow "  0) 退出"
       yellow "  r) 返回语言选择 / Return to language selection"
       echo
@@ -612,17 +648,21 @@ main_menu() {
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/gen-wp-cron.sh")
           ;;
         10)
+          run_wp_baseline_verifier
+          read -rp "完成。按回车返回菜单..." _
+          ;;
+        11)
           echo "将安装 / 初始化 rkhunter（系统后门 / 木马检测）..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/install-rkhunter.sh")
           ;;
-        11)
+        12)
           echo "将设置 rkhunter 定时扫描（报错邮件通知 /日志维护）..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron.sh")
           ;;
-        12)
+        13)
           baseline_diagnostics_menu
           ;;
-        13)
+        14)
           print_machine_profile_and_recommendation
           show_lomp_lnmp_profile_menu
           ;;
