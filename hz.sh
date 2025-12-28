@@ -18,6 +18,7 @@ HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/He
 HZ_INSTALL_BASE_URL="${HZ_INSTALL_BASE_URL%/}"
 HZ_WP_INSTALLER_SCRIPT="install-ols"
 HZ_WP_INSTALLER_SCRIPT+="-wp-standard.sh"
+MACHINE_PROFILE_SHOWN=0
 
 baseline_menu_normalize_format() {
   local format
@@ -189,6 +190,15 @@ print_machine_profile_and_recommendation() {
     echo "推荐档位: ${MACHINE_RECOMMENDED_TIER}"
   fi
   echo
+}
+
+show_machine_profile_once() {
+  if [ "${MACHINE_PROFILE_SHOWN}" -eq 1 ]; then
+    return
+  fi
+
+  print_machine_profile_and_recommendation
+  MACHINE_PROFILE_SHOWN=1
 }
 
 parse_global_args() {
@@ -367,6 +377,10 @@ show_lomp_lnmp_profile_menu() {
       echo "  0) 返回"
       echo
       read -rp "请输入选项: " choice
+    fi
+
+    if echo "$choice" | grep -Eq '^[1-6]$'; then
+      show_machine_profile_once
     fi
 
     case "$choice" in
@@ -564,7 +578,6 @@ main_menu() {
           baseline_diagnostics_menu
           ;;
         14)
-          print_machine_profile_and_recommendation
           show_lomp_lnmp_profile_menu
           ;;
         0)
@@ -663,7 +676,6 @@ main_menu() {
           baseline_diagnostics_menu
           ;;
         14)
-          print_machine_profile_and_recommendation
           show_lomp_lnmp_profile_menu
           ;;
         0)

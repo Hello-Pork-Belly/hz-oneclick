@@ -82,6 +82,9 @@ if [ ! -r "${REPO_ROOT}/lib/baseline.sh" ]; then
   exit 0
 fi
 
+echo "[baseline-smoke] shell syntax check"
+bash -n "${REPO_ROOT}/hz.sh"
+
 if [ -r "${REPO_ROOT}/lib/baseline_common.sh" ]; then
   # shellcheck source=/dev/null
   . "${REPO_ROOT}/lib/baseline_common.sh"
