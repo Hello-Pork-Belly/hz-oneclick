@@ -58,6 +58,7 @@ SITE_SIZE_LIMIT_GB=""
 SITE_SIZE_CHECK_SCRIPT=""
 SITE_SIZE_CHECK_SERVICE=""
 SITE_SIZE_CHECK_TIMER=""
+LSPHP_EXTENSIONS_APT_UPDATED=0
 
 if [ -r "$COMMON_LIB" ]; then
   # shellcheck source=/dev/null
@@ -2506,6 +2507,9 @@ apply_wp_site_health_baseline() {
 
   php_bin="$(detect_lsphp_bin)" || php_bin=""
   if [ -n "$php_bin" ]; then
+    LSPHP_BIN="$php_bin"
+  fi
+  if [ -n "$php_bin" ]; then
     if ensure_lsphp_extensions "$php_bin"; then
       php_ext_changed=1
     fi
@@ -2705,66 +2709,66 @@ ensure_uploads_fonts_dir() {
 }
 
 ensure_lsphp_modules_recommended() {
-  # [ANCHOR:WP_IMAGICK]
-  local php_bin php_version pkg_prefix
-  local modules
+  # [ANCHOR:LSPHP_EXTENSIONS]
+  local php_bin="${1:-${LSPHP_BIN:-}}"
+  local bin candidates=()
+  local pkg_suffix modules
   local missing=()
-  local is_lsws="no"
-  local status_imagick status_intl
+  local missing_names=()
 
-  php_bin="$(command -v php 2>/dev/null || true)"
+  if [ -n "$php_bin" ] && [ ! -x "$php_bin" ]; then
+    php_bin=""
+  fi
+
   if [ -z "$php_bin" ]; then
-    log_warn "未检测到 PHP CLI，推荐模块检查已跳过。"
-    return
+    for bin in /usr/local/lsws/lsphp*/bin/php; do
+      if [ -x "$bin" ]; then
+        candidates+=("$bin")
+      fi
+    done
+    if [ "${#candidates[@]}" -gt 0 ]; then
+      php_bin="$(printf "%s\n" "${candidates[@]}" | sort -V | tail -n1)"
+    fi
   fi
 
-  if "$php_bin" -v 2>/dev/null | grep -qi "LiteSpeed"; then
-    is_lsws="yes"
-  elif command -v lsphp >/dev/null 2>&1; then
-    is_lsws="yes"
-  elif command -v systemctl >/dev/null 2>&1 && systemctl status lsws >/dev/null 2>&1; then
-    is_lsws="yes"
+  if [ -z "$php_bin" ]; then
+    log_warn "未检测到 LSPHP 可执行文件，推荐模块安装已跳过。"
+    return 1
   fi
 
-  if [ "$is_lsws" != "yes" ]; then
-    log_info "当前 PHP 非 LiteSpeed/LSWS，跳过推荐模块安装以避免混用 PHP 栈。"
-    return
-  fi
-
-  php_version="$("$php_bin" -r 'echo PHP_MAJOR_VERSION.PHP_MINOR_VERSION;' 2>/dev/null || true)"
-  if [ -z "$php_version" ]; then
-    log_warn "无法识别 PHP 版本，推荐模块安装已跳过。"
-    return
-  fi
-
-  pkg_prefix="lsphp${php_version}"
   modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || modules=""
+  pkg_suffix="$(get_lsphp_pkg_suffix "$php_bin")"
 
   if ! printf '%s\n' "$modules" | grep -qx "imagick"; then
-    missing+=("${pkg_prefix}-imagick")
+    missing+=("lsphp${pkg_suffix}-imagick")
+    missing_names+=("imagick")
   fi
   if ! printf '%s\n' "$modules" | grep -qx "intl"; then
-    missing+=("${pkg_prefix}-intl")
+    missing+=("lsphp${pkg_suffix}-intl")
+    missing_names+=("intl")
   fi
 
   if [ "${#missing[@]}" -eq 0 ]; then
     log_info "推荐 PHP 模块已安装（imagick/intl）。"
-    return
+    return 1
   fi
 
   if ! command -v apt-get >/dev/null 2>&1; then
     log_warn "未检测到 apt-get，推荐模块安装已跳过。"
-    return
+    return 1
   fi
 
-  log_info "尝试安装推荐 PHP 模块（${missing[*]}）..."
-  if ! apt-get update -qq; then
-    log_warn "apt-get update 失败，推荐模块安装可能无法完成。"
+  if [ "${LSPHP_EXTENSIONS_APT_UPDATED:-0}" -eq 0 ]; then
+    if ! apt-get update -qq; then
+      log_warn "apt-get update 失败，推荐模块安装可能无法完成。"
+    fi
+    LSPHP_EXTENSIONS_APT_UPDATED=1
   fi
 
+  log_info "尝试安装推荐 PHP 模块（${missing_names[*]}）..."
   if ! apt-get install -y "${missing[@]}"; then
-    log_warn "推荐模块安装失败（${missing[*]}），继续执行。"
-    return
+    log_warn "推荐模块安装失败（${missing_names[*]}），继续执行。"
+    return 1
   fi
 
   if systemctl restart lsws >/dev/null 2>&1; then
@@ -2773,18 +2777,8 @@ ensure_lsphp_modules_recommended() {
     log_warn "OpenLiteSpeed 重启失败，请手动检查。"
   fi
 
-  modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || modules=""
-  if printf '%s\n' "$modules" | grep -qx "imagick"; then
-    status_imagick="ok"
-  else
-    status_imagick="missing"
-  fi
-  if printf '%s\n' "$modules" | grep -qx "intl"; then
-    status_intl="ok"
-  else
-    status_intl="missing"
-  fi
-  log_info "推荐 PHP 模块状态：imagick=${status_imagick}, intl=${status_intl}"
+  log_info "已安装推荐 PHP 扩展（${missing_names[*]}）。"
+  return 0
 }
 
 resolve_default_theme_slug() {
@@ -2883,10 +2877,13 @@ ensure_default_theme_policy() {
 apply_wp_lomp_baseline() {
   # [ANCHOR:WP_LOMP_BASELINE]
   # [ANCHOR:WP_BASELINE_START]
+  local php_bin
+
   ensure_lscache_only
   ensure_wp_cache
   ensure_uploads_fonts_dir
-  ensure_lsphp_modules_recommended
+  php_bin="$(detect_lsphp_bin)" || php_bin=""
+  ensure_lsphp_modules_recommended "$php_bin"
   ensure_default_theme_policy
   # [ANCHOR:WP_BASELINE_END]
 }
