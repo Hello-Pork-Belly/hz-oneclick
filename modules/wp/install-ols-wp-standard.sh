@@ -2708,6 +2708,60 @@ ensure_uploads_fonts_dir() {
   fi
 }
 
+ensure_lscwp_page_cache_detect() {
+  # [ANCHOR:LSCWP_PAGE_CACHE_DETECT]
+  local wp_config wp_content advanced_cache plugin_dir source_cache
+  local owner_group wp_content_perm
+
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    log_warn "未找到站点目录，跳过 Page Cache 检测辅助。"
+    return
+  fi
+
+  wp_config="${DOC_ROOT}/wp-config.php"
+  wp_content="${DOC_ROOT}/wp-content"
+  advanced_cache="${wp_content}/advanced-cache.php"
+  plugin_dir="${wp_content}/plugins/litespeed-cache"
+
+  if [ ! -f "$wp_config" ]; then
+    log_warn "未找到 wp-config.php，跳过 Page Cache 检测辅助。"
+    return
+  fi
+
+  if ! grep -Eq "define\\(['\"]WP_CACHE['\"],\\s*true\\)" "$wp_config"; then
+    ensure_wp_cache
+  fi
+
+  if [ ! -d "$wp_content" ]; then
+    log_warn "未找到 wp-content，跳过 advanced-cache.php 检测。"
+    return
+  fi
+
+  if [ ! -f "$advanced_cache" ]; then
+    if [ -d "$plugin_dir" ]; then
+      source_cache="$(find "$plugin_dir" -type f -name advanced-cache.php -print -quit 2>/dev/null || true)"
+      if [ -n "$source_cache" ] && cp -f "$source_cache" "$advanced_cache" 2>/dev/null; then
+        log_info "已补充 advanced-cache.php：${advanced_cache}"
+      else
+        log_warn "未找到 LiteSpeed Cache 提供的 advanced-cache.php，跳过复制。"
+        return
+      fi
+    else
+      log_warn "未找到 LiteSpeed Cache 目录，无法补充 advanced-cache.php。"
+      return
+    fi
+  fi
+
+  owner_group="$(stat -c '%u:%g' "$wp_content" 2>/dev/null || true)"
+  if [ -n "$owner_group" ]; then
+    chown "$owner_group" "$advanced_cache" >/dev/null 2>&1 || true
+  fi
+  wp_content_perm="$(stat -c '%a' "$wp_content" 2>/dev/null || true)"
+  if [ -n "$wp_content_perm" ]; then
+    chmod "$wp_content_perm" "$advanced_cache" >/dev/null 2>&1 || true
+  fi
+}
+
 ensure_lsphp_modules_recommended() {
   # [ANCHOR:LSPHP_EXTENSIONS]
   local php_bin="${1:-${LSPHP_BIN:-}}"
@@ -2935,6 +2989,16 @@ verify_wp_baseline() {
     log_warn "WARN - 未找到 wp-config.php，无法验证 WP_CACHE。"
   fi
 
+  if [ -n "${DOC_ROOT:-}" ] && [ -d "${DOC_ROOT}/wp-content" ]; then
+    if [ -f "${DOC_ROOT}/wp-content/advanced-cache.php" ]; then
+      log_info "OK - advanced-cache.php 已存在。"
+    else
+      log_warn "WARN - advanced-cache.php 缺失。"
+    fi
+  else
+    log_warn "WARN - 未找到 wp-content，无法验证 advanced-cache.php。"
+  fi
+
   if [ "$wp_installed" -eq 1 ]; then
     uploads_basedir="$(wp_cli_base eval 'echo wp_upload_dir()["basedir"];' 2>/dev/null || true)"
   fi
@@ -3011,6 +3075,7 @@ apply_wp_lomp_baseline() {
   ensure_lscache_only
   ensure_wp_cache
   ensure_uploads_fonts_dir
+  ensure_lscwp_page_cache_detect
   php_bin="$(detect_lsphp_bin)" || php_bin=""
   ensure_lsphp_modules_recommended "$php_bin"
   ensure_default_theme_policy
