@@ -2708,10 +2708,55 @@ ensure_uploads_fonts_dir() {
   fi
 }
 
+ensure_wp_indexing_policy() {
+  # [ANCHOR:WP_INDEXING_POLICY]
+  local choice policy_value
+
+  if ! command -v wp >/dev/null 2>&1; then
+    log_warn "未找到 wp-cli，跳过搜索引擎索引策略设置。"
+    return
+  fi
+
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    log_warn "未找到站点目录，跳过搜索引擎索引策略设置。"
+    return
+  fi
+
+  if ! wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+    log_warn "WordPress 尚未完成安装，跳过搜索引擎索引策略设置。"
+    return
+  fi
+
+  if [ -t 0 ] && [ -t 1 ]; then
+    read -rp "Allow search engines to index this site? (recommended for production) [Y/n] " choice
+  else
+    log_info "非交互模式，默认允许搜索引擎索引（blog_public=1）。"
+    choice="Y"
+  fi
+
+  choice="${choice:-Y}"
+  case "$choice" in
+    [Nn]*)
+      policy_value="0"
+      ;;
+    *)
+      policy_value="1"
+      ;;
+  esac
+
+  if wp_cli_base option update blog_public "$policy_value" >/dev/null 2>&1; then
+    log_info "已设置 blog_public=${policy_value}。"
+  else
+    log_warn "blog_public 写入失败，跳过。"
+  fi
+}
+
 ensure_lscwp_page_cache_detect() {
   # [ANCHOR:LSCWP_PAGE_CACHE_DETECT]
+  # [ANCHOR:LSCWP_DROPIN]
   local wp_config wp_content advanced_cache plugin_dir source_cache
   local owner_group wp_content_perm
+  local lscwp_ready="no"
 
   if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
     log_warn "未找到站点目录，跳过 Page Cache 检测辅助。"
@@ -2732,6 +2777,28 @@ ensure_lscwp_page_cache_detect() {
     ensure_wp_cache
   fi
 
+  if command -v wp >/dev/null 2>&1; then
+    if wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+      if wp_cli_base plugin is-installed litespeed-cache >/dev/null 2>&1 \
+        && wp_cli_base plugin is-active litespeed-cache >/dev/null 2>&1; then
+        lscwp_ready="yes"
+      else
+        log_warn "LiteSpeed Cache 未安装或未启用，跳过 advanced-cache.php 补充。"
+        return
+      fi
+    else
+      log_warn "WordPress 尚未完成安装，跳过 advanced-cache.php 补充。"
+      return
+    fi
+  else
+    log_warn "未找到 wp-cli，无法确认 LiteSpeed Cache 状态，跳过 advanced-cache.php 补充。"
+    return
+  fi
+
+  if [ "$lscwp_ready" != "yes" ]; then
+    return
+  fi
+
   if [ ! -d "$wp_content" ]; then
     log_warn "未找到 wp-content，跳过 advanced-cache.php 检测。"
     return
@@ -2739,7 +2806,14 @@ ensure_lscwp_page_cache_detect() {
 
   if [ ! -f "$advanced_cache" ]; then
     if [ -d "$plugin_dir" ]; then
-      source_cache="$(find "$plugin_dir" -type f -name advanced-cache.php -print -quit 2>/dev/null || true)"
+      if [ -f "${plugin_dir}/advanced-cache.php" ]; then
+        source_cache="${plugin_dir}/advanced-cache.php"
+      elif [ -f "${plugin_dir}/data/advanced-cache.php" ]; then
+        source_cache="${plugin_dir}/data/advanced-cache.php"
+      else
+        source_cache="$(find "$plugin_dir" -maxdepth 4 -type f -name advanced-cache.php -print -quit 2>/dev/null || true)"
+      fi
+
       if [ -n "$source_cache" ] && cp -f "$source_cache" "$advanced_cache" 2>/dev/null; then
         log_info "已补充 advanced-cache.php：${advanced_cache}"
       else
@@ -2989,6 +3063,24 @@ verify_wp_baseline() {
     log_warn "WARN - 未找到 wp-config.php，无法验证 WP_CACHE。"
   fi
 
+  if [ "$wp_installed" -eq 1 ]; then
+    local blog_public=""
+    blog_public="$(wp_cli_base option get blog_public 2>/dev/null || true)"
+    case "$blog_public" in
+      1)
+        log_info "OK - blog_public=1（已启用索引）。"
+        ;;
+      0)
+        log_info "OK - blog_public=0（已禁用索引）。"
+        ;;
+      *)
+        log_warn "WARN - 无法读取 blog_public。"
+        ;;
+    esac
+  else
+    log_warn "WARN - WordPress 未安装，无法验证 blog_public。"
+  fi
+
   if [ -n "${DOC_ROOT:-}" ] && [ -d "${DOC_ROOT}/wp-content" ]; then
     if [ -f "${DOC_ROOT}/wp-content/advanced-cache.php" ]; then
       log_info "OK - advanced-cache.php 已存在。"
@@ -3073,6 +3165,7 @@ apply_wp_lomp_baseline() {
   local php_bin
 
   ensure_lscache_only
+  ensure_wp_indexing_policy
   ensure_wp_cache
   ensure_uploads_fonts_dir
   ensure_lscwp_page_cache_detect
