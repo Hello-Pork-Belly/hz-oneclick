@@ -2874,6 +2874,135 @@ ensure_default_theme_policy() {
   log_info "默认主题已设置为 ${selected_theme}。"
 }
 
+verify_wp_baseline() {
+  # [ANCHOR:WP_BASELINE_VERIFY]
+  local wp_config="${DOC_ROOT:-}/wp-config.php"
+  local wp_installed=0
+  local uploads_basedir=""
+  local fonts_dir=""
+  local target_theme expected_theme active_theme installed_themes
+  local php_bin modules missing_modules=()
+  local siteurl homeurl adminurl
+
+  log_info "WP baseline verification checklist:"
+
+  if command -v wp >/dev/null 2>&1 && [ -n "${DOC_ROOT:-}" ] && [ -d "$DOC_ROOT" ]; then
+    if wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+      wp_installed=1
+      log_info "OK - WordPress core installed."
+    else
+      log_warn "WARN - WordPress core not installed."
+    fi
+  else
+    log_warn "WARN - wp-cli 或站点目录不可用，无法验证 WordPress core。"
+  fi
+
+  if [ "$wp_installed" -eq 1 ]; then
+    if wp_cli_base plugin is-installed litespeed-cache >/dev/null 2>&1 \
+      && wp_cli_base plugin is-active litespeed-cache >/dev/null 2>&1; then
+      log_info "OK - LiteSpeed Cache 已安装并启用。"
+    else
+      log_warn "WARN - LiteSpeed Cache 未安装或未启用。"
+    fi
+
+    local plugins plugin extra_plugins=()
+    plugins="$(wp_cli_base plugin list --field=name --skip-plugins --skip-themes 2>/dev/null)" || plugins=""
+    for plugin in $plugins; do
+      if [ "$plugin" != "litespeed-cache" ]; then
+        extra_plugins+=("$plugin")
+      fi
+    done
+    if [ "${#extra_plugins[@]}" -eq 0 ]; then
+      log_info "OK - 未发现额外插件。"
+    else
+      log_warn "WARN - 检测到额外插件：${extra_plugins[*]}"
+    fi
+  else
+    log_warn "WARN - WordPress 未安装，无法验证插件策略。"
+  fi
+
+  if [ -f "$wp_config" ]; then
+    local wp_cache_value=""
+    if [ "$wp_installed" -eq 1 ]; then
+      wp_cache_value="$(wp_cli_base config get WP_CACHE --type=constant 2>/dev/null || true)"
+    fi
+    if [ "$wp_cache_value" = "true" ] || grep -Eq "define\\(['\"]WP_CACHE['\"],\\s*true\\)" "$wp_config"; then
+      log_info "OK - WP_CACHE=true."
+    else
+      log_warn "WARN - WP_CACHE 未设置为 true。"
+    fi
+  else
+    log_warn "WARN - 未找到 wp-config.php，无法验证 WP_CACHE。"
+  fi
+
+  if [ "$wp_installed" -eq 1 ]; then
+    uploads_basedir="$(wp_cli_base eval 'echo wp_upload_dir()["basedir"];' 2>/dev/null || true)"
+  fi
+  if [ -z "$uploads_basedir" ] && [ -n "${DOC_ROOT:-}" ] && [ -d "$DOC_ROOT" ]; then
+    uploads_basedir="${DOC_ROOT}/wp-content/uploads"
+  fi
+  if [ -n "$uploads_basedir" ]; then
+    fonts_dir="${uploads_basedir}/fonts"
+    if [ -d "$uploads_basedir" ] && [ -d "$fonts_dir" ]; then
+      log_info "OK - uploads 目录与 fonts 子目录存在：${uploads_basedir}"
+    else
+      log_warn "WARN - uploads 或 fonts 目录缺失：${uploads_basedir}"
+    fi
+  else
+    log_warn "WARN - 无法确定 uploads 目录。"
+  fi
+
+  if [ "$wp_installed" -eq 1 ]; then
+    active_theme="$(wp_cli_base theme list --status=active --field=name --skip-plugins --skip-themes 2>/dev/null | head -n1)"
+    installed_themes="$(wp_cli_base theme list --field=name --skip-plugins --skip-themes 2>/dev/null)" || installed_themes=""
+    target_theme="$(resolve_default_theme_slug)"
+    if [ -n "$target_theme" ] && printf '%s\n' "$installed_themes" | grep -qx "$target_theme"; then
+      expected_theme="$target_theme"
+    else
+      expected_theme="$(printf '%s\n' "$installed_themes" | awk '/^twentytwenty/ {print}' | sort -V | tail -n1)"
+    fi
+
+    if [ -n "$expected_theme" ]; then
+      if [ "$active_theme" = "$expected_theme" ]; then
+        log_info "OK - 默认主题已启用：${active_theme}"
+      else
+        log_warn "WARN - 当前主题为 ${active_theme:-未知}，期望 ${expected_theme}。"
+      fi
+    else
+      log_warn "WARN - 未检测到 Twenty Twenty* 主题。"
+    fi
+  else
+    log_warn "WARN - WordPress 未安装，无法验证主题策略。"
+  fi
+
+  php_bin="$(detect_lsphp_bin)" || php_bin=""
+  if [ -n "$php_bin" ] && [ -x "$php_bin" ]; then
+    modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || modules=""
+    if ! printf '%s\n' "$modules" | grep -qx "imagick"; then
+      missing_modules+=("imagick")
+    fi
+    if ! printf '%s\n' "$modules" | grep -qx "intl"; then
+      missing_modules+=("intl")
+    fi
+    if [ "${#missing_modules[@]}" -eq 0 ]; then
+      log_info "OK - LSPHP 扩展已安装（imagick/intl）。"
+    else
+      log_warn "WARN - LSPHP 缺少扩展：${missing_modules[*]}"
+    fi
+  else
+    log_warn "WARN - 未检测到 LSPHP 可执行文件，无法验证扩展。"
+  fi
+
+  if [ "$wp_installed" -eq 1 ]; then
+    siteurl="$(wp_cli_base option get siteurl 2>/dev/null || true)"
+    homeurl="$(wp_cli_base option get home 2>/dev/null || true)"
+    adminurl="$(wp_cli_base eval 'echo admin_url();' 2>/dev/null || true)"
+    if [ -n "$siteurl" ] || [ -n "$homeurl" ] || [ -n "$adminurl" ]; then
+      log_info "Site URLs: siteurl=${siteurl:-N/A} home=${homeurl:-N/A} admin=${adminurl:-N/A}"
+    fi
+  fi
+}
+
 apply_wp_lomp_baseline() {
   # [ANCHOR:WP_LOMP_BASELINE]
   # [ANCHOR:WP_BASELINE_START]
@@ -2885,6 +3014,7 @@ apply_wp_lomp_baseline() {
   php_bin="$(detect_lsphp_bin)" || php_bin=""
   ensure_lsphp_modules_recommended "$php_bin"
   ensure_default_theme_policy
+  verify_wp_baseline
   # [ANCHOR:WP_BASELINE_END]
 }
 
