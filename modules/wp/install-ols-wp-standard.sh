@@ -511,11 +511,53 @@ opt_task_lscwp() {
 
 opt_task_baseline_cleanup() {
   local lang
+  local wp_path
+  local post_ids_raw page_ids_raw comment_ids_raw
+  local post_ids=()
+  local page_ids=()
+  local comment_ids=()
   lang="$(get_finish_lang)"
 
   log_step "Optimize: baseline cleanup"
   if ! opt_prepare_context; then
     return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  post_ids_raw="$(wp --path="$wp_path" --allow-root post list --post_type=post --format=ids --skip-plugins --skip-themes 2>/dev/null || true)"
+  read -r -a post_ids <<<"$post_ids_raw"
+  if [ "${#post_ids[@]}" -gt 0 ]; then
+    wp --path="$wp_path" --allow-root post delete "${post_ids[@]}" --force --skip-plugins --skip-themes
+  else
+    if [ "$lang" = "en" ]; then
+      log_info "No posts to delete."
+    else
+      log_info "无可删除文章。"
+    fi
+  fi
+
+  page_ids_raw="$(wp --path="$wp_path" --allow-root post list --post_type=page --format=ids --skip-plugins --skip-themes 2>/dev/null || true)"
+  read -r -a page_ids <<<"$page_ids_raw"
+  if [ "${#page_ids[@]}" -gt 0 ]; then
+    wp --path="$wp_path" --allow-root post delete "${page_ids[@]}" --force --skip-plugins --skip-themes
+  else
+    if [ "$lang" = "en" ]; then
+      log_info "No pages to delete."
+    else
+      log_info "无可删除页面。"
+    fi
+  fi
+
+  comment_ids_raw="$(wp --path="$wp_path" --allow-root comment list --format=ids --skip-plugins --skip-themes 2>/dev/null || true)"
+  read -r -a comment_ids <<<"$comment_ids_raw"
+  if [ "${#comment_ids[@]}" -gt 0 ]; then
+    wp --path="$wp_path" --allow-root comment delete "${comment_ids[@]}" --force --skip-plugins --skip-themes
+  else
+    if [ "$lang" = "en" ]; then
+      log_info "No comments to delete."
+    else
+      log_info "无可删除评论。"
+    fi
   fi
 
   apply_wp_site_health_baseline
