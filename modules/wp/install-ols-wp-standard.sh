@@ -560,27 +560,86 @@ opt_task_indexing_policy() {
   fi
 }
 
-opt_task_rest_loopback_checks() {
-  local lang
+opt_task_rest_api_check() {
+  local lang wp_path site_url scheme host url http_code
   lang="$(get_finish_lang)"
 
-  log_step "Optimize: REST/loopback"
+  log_step "Optimize: REST API /wp-json"
   if ! opt_prepare_context; then
     return 1
   fi
 
-  ensure_wp_cache
-  ensure_lscwp_page_cache_detect
-  ensure_wp_loopback_and_rest_health
-  if [ -t 0 ] && [ -t 1 ]; then
-    run_loopback_preflight
-  else
-    if [ "$lang" = "en" ]; then
-      log_info "Non-interactive mode: skipping loopback preflight prompts."
-    else
-      log_info "非交互模式：跳过 Loopback 预检交互提示。"
-    fi
+  wp_path="${OPT_WP_PATH:-}"
+  site_url="$(wp --path="$wp_path" --allow-root option get home --skip-plugins --skip-themes 2>/dev/null || true)"
+  if [ -z "$site_url" ]; then
+    site_url="$(wp --path="$wp_path" --allow-root option get siteurl --skip-plugins --skip-themes 2>/dev/null || true)"
   fi
+  site_url="${site_url%/}"
+
+  if [ -z "$site_url" ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Unable to read site URL via wp-cli; skip REST API check."
+    else
+      log_warn "无法通过 wp-cli 读取站点 URL，跳过 REST API 检查。"
+    fi
+    return 1
+  fi
+
+  scheme="$(printf '%s' "$site_url" | awk -F:// '{print $1}')"
+  host="$(printf '%s' "$site_url" | sed -E 's#^[a-zA-Z]+://##; s#/.*##')"
+  if [ "$scheme" = "$site_url" ] || [ -z "$scheme" ]; then
+    scheme="http"
+  fi
+  if [ -z "$host" ]; then
+    host="$site_url"
+  fi
+
+  url="${scheme}://127.0.0.1/wp-json/"
+  if [ "$lang" = "en" ]; then
+    log_info "Checking REST API: ${url} (Host: ${host})"
+  else
+    log_info "检查 REST API：${url}（Host：${host}）"
+  fi
+
+  if [ "$scheme" = "https" ]; then
+    http_code="$(curl -sS -o /dev/null -w "%{http_code}" -L --max-redirs 5 -H "Host: ${host}" -k "${url}" 2>/dev/null || true)"
+  else
+    http_code="$(curl -sS -o /dev/null -w "%{http_code}" -L --max-redirs 5 -H "Host: ${host}" "${url}" 2>/dev/null || true)"
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_info "HTTP status: ${http_code}"
+  else
+    log_info "HTTP 状态：${http_code}"
+  fi
+
+  case "$http_code" in
+    200)
+      if [ "$lang" = "en" ]; then
+        log_ok "REST API reachable (HTTP 200)."
+      else
+        log_ok "REST API 可访问（HTTP 200）。"
+      fi
+      ;;
+    000)
+      if [ "$lang" = "en" ]; then
+        log_warn "No HTTP response from loopback. Check web server, firewall, or local loopback access."
+      else
+        log_warn "Loopback 未收到 HTTP 响应，请检查 Web 服务、防火墙或本机回环访问。"
+      fi
+      ;;
+    *)
+      if [ "$lang" = "en" ]; then
+        log_warn "REST API check returned HTTP ${http_code}."
+        log_info "Check permalinks (pretty permalinks), security/caching rules blocking /wp-json/, and rewrite rules."
+        log_info "If using LiteSpeed/LSCWP, review REST API blocking options."
+      else
+        log_warn "REST API 检查返回 HTTP ${http_code}。"
+        log_info "请检查固定链接（美观链接）、安全/缓存规则是否拦截 /wp-json/，以及重写规则。"
+        log_info "如使用 LiteSpeed/LSCWP，请检查是否启用了 REST API 阻止选项。"
+      fi
+      ;;
+  esac
 }
 
 show_optimize_menu() {
@@ -605,7 +664,7 @@ show_optimize_menu() {
       echo "  2) Optimize: baseline cleanup (coming soon)"
       echo "  3) Optimize: permalinks (coming soon)"
       echo "  4) Optimize: indexing policy (coming soon)"
-      echo "  5) Optimize: REST/loopback checks (coming soon)"
+      echo "  5) Optimize: REST API /wp-json check"
       echo "  0) Back / Exit"
       read -rp "Choose [0-5]: " choice
     else
@@ -614,7 +673,7 @@ show_optimize_menu() {
       echo "  2) Optimize：基线清理（即将推出）"
       echo "  3) Optimize：固定链接（即将推出）"
       echo "  4) Optimize：索引策略（即将推出）"
-      echo "  5) Optimize：REST/Loopback 检查（即将推出）"
+      echo "  5) Optimize：REST API /wp-json 检查"
       echo "  0) 返回 / 退出"
       read -rp "请输入选项 [0-5]: " choice
     fi
@@ -625,7 +684,12 @@ show_optimize_menu() {
         optimize_finish_menu
         return
         ;;
-      2|3|4|5)
+      5)
+        opt_task_rest_api_check
+        optimize_finish_menu
+        return
+        ;;
+      2|3|4)
         if [ "$lang" = "en" ]; then
           echo "Coming soon."
         else
