@@ -762,8 +762,8 @@ show_optimize_menu() {
       echo "=== Optimize Menu ==="
       echo "  1) Optimize: LSCWP (enable)"
       echo "  2) Optimize: baseline cleanup (coming soon)"
-      echo "  3) Optimize: permalinks (coming soon)"
-      echo "  4) Optimize: indexing policy (coming soon)"
+      echo "  3) Optimize: Permalinks"
+      echo "  4) Optimize: Indexing policy"
       echo "  5) Optimize: REST API /wp-json check"
       echo "  6) Optimize: Site Health snapshot"
       echo "  0) Back / Exit"
@@ -772,8 +772,8 @@ show_optimize_menu() {
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
       echo "  2) Optimize：基线清理（即将推出）"
-      echo "  3) Optimize：固定链接（即将推出）"
-      echo "  4) Optimize：索引策略（即将推出）"
+      echo "  3) Optimize：固定链接"
+      echo "  4) Optimize：索引策略"
       echo "  5) Optimize：REST API /wp-json 检查"
       echo "  6) Optimize：站点健康快照"
       echo "  0) 返回 / 退出"
@@ -782,21 +782,46 @@ show_optimize_menu() {
 
     case "$choice" in
       1)
-        opt_task_lscwp
+        if opt_task_lscwp; then
+          optimize_finish_menu
+          return 0
+        fi
         optimize_finish_menu
-        return
+        return 1
+        ;;
+      3)
+        if opt_task_permalinks; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      4)
+        if opt_task_indexing_policy; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
         ;;
       5)
-        opt_task_rest_api_check
+        if opt_task_rest_api_check; then
+          optimize_finish_menu
+          return 0
+        fi
         optimize_finish_menu
-        return
+        return 1
         ;;
       6)
-        opt_task_site_health_snapshot
+        if opt_task_site_health_snapshot; then
+          optimize_finish_menu
+          return 0
+        fi
         optimize_finish_menu
-        return
+        return 1
         ;;
-      2|3|4)
+      2)
         if [ "$lang" = "en" ]; then
           echo "Coming soon."
         else
