@@ -510,7 +510,10 @@ opt_task_lscwp() {
 }
 
 opt_task_baseline_cleanup() {
-  local lang
+  local lang wp_path
+  local -a removed_plugins removed_content
+  local plugin
+  local post_ids page_ids comment_ids comment_id comment_content
   lang="$(get_finish_lang)"
 
   log_step "Optimize: baseline cleanup"
@@ -518,11 +521,106 @@ opt_task_baseline_cleanup() {
     return 1
   fi
 
-  apply_wp_site_health_baseline
-  if [ "$lang" = "en" ]; then
-    log_info "Baseline cleanup done."
+  wp_path="${OPT_WP_PATH:-}"
+
+  for plugin in akismet hello; do
+    if wp --path="$wp_path" --allow-root plugin is-installed "$plugin" --skip-plugins --skip-themes >/dev/null 2>&1; then
+      wp --path="$wp_path" --allow-root plugin deactivate "$plugin" --skip-plugins --skip-themes >/dev/null 2>&1 || true
+      if wp --path="$wp_path" --allow-root plugin delete "$plugin" --skip-plugins --skip-themes >/dev/null 2>&1; then
+        if [ "$plugin" = "akismet" ]; then
+          removed_plugins+=("Akismet")
+        else
+          removed_plugins+=("Hello Dolly")
+        fi
+      fi
+    else
+      local plugin_label
+      if [ "$plugin" = "akismet" ]; then
+        plugin_label="Akismet"
+      else
+        plugin_label="Hello Dolly"
+      fi
+      if [ "$lang" = "en" ]; then
+        log_info "Default plugin ${plugin_label} already clean."
+      else
+        log_info "默认插件 ${plugin_label} 已是干净状态。"
+      fi
+    fi
+  done
+
+  post_ids="$(wp --path="$wp_path" --allow-root post list --post_type=post --post_status=any --fields=ID,post_title --format=csv --skip-plugins --skip-themes 2>/dev/null | awk -F',' 'NR>1 && $2=="Hello world!" {print $1}')"
+  if [ -n "$post_ids" ]; then
+    wp --path="$wp_path" --allow-root post delete $post_ids --force --skip-plugins --skip-themes >/dev/null 2>&1 || true
+    removed_content+=("Hello world! post")
   else
-    log_info "基线清理完成。"
+    if [ "$lang" = "en" ]; then
+      log_info "Sample post already clean."
+    else
+      log_info "示例文章已是干净状态。"
+    fi
+  fi
+
+  page_ids="$(wp --path="$wp_path" --allow-root post list --post_type=page --post_status=any --fields=ID,post_title --format=csv --skip-plugins --skip-themes 2>/dev/null | awk -F',' 'NR>1 && $2=="Sample Page" {print $1}')"
+  if [ -n "$page_ids" ]; then
+    wp --path="$wp_path" --allow-root post delete $page_ids --force --skip-plugins --skip-themes >/dev/null 2>&1 || true
+    removed_content+=("Sample Page")
+  else
+    if [ "$lang" = "en" ]; then
+      log_info "Sample page already clean."
+    else
+      log_info "示例页面已是干净状态。"
+    fi
+  fi
+
+  comment_ids="$(wp --path="$wp_path" --allow-root comment list --search="Hi, this is a comment." --format=ids --skip-plugins --skip-themes 2>/dev/null || true)"
+  if [ -n "$comment_ids" ]; then
+    local -a matched_comments=()
+    for comment_id in $comment_ids; do
+      comment_content="$(wp --path="$wp_path" --allow-root comment get "$comment_id" --field=content --skip-plugins --skip-themes 2>/dev/null || true)"
+      if [ "$comment_content" = "Hi, this is a comment." ]; then
+        matched_comments+=("$comment_id")
+      fi
+    done
+    if [ "${#matched_comments[@]}" -gt 0 ]; then
+      wp --path="$wp_path" --allow-root comment delete "${matched_comments[@]}" --force --skip-plugins --skip-themes >/dev/null 2>&1 || true
+      removed_content+=("Default comment")
+    else
+      if [ "$lang" = "en" ]; then
+        log_info "Default comment already clean."
+      else
+        log_info "默认评论已是干净状态。"
+      fi
+    fi
+  else
+    if [ "$lang" = "en" ]; then
+      log_info "Default comment already clean."
+    else
+      log_info "默认评论已是干净状态。"
+    fi
+  fi
+
+  if [ "$lang" = "en" ]; then
+    if [ "${#removed_plugins[@]}" -gt 0 ]; then
+      log_info "Removed plugins: ${removed_plugins[*]}"
+    else
+      log_info "Default plugins already clean."
+    fi
+    if [ "${#removed_content[@]}" -gt 0 ]; then
+      log_info "Removed sample content: ${removed_content[*]}"
+    else
+      log_info "Sample content already clean."
+    fi
+  else
+    if [ "${#removed_plugins[@]}" -gt 0 ]; then
+      log_info "已移除插件：${removed_plugins[*]}"
+    else
+      log_info "默认插件已是干净状态。"
+    fi
+    if [ "${#removed_content[@]}" -gt 0 ]; then
+      log_info "已移除示例内容：${removed_content[*]}"
+    else
+      log_info "示例内容已是干净状态。"
+    fi
   fi
 }
 
@@ -661,7 +759,7 @@ show_optimize_menu() {
     if [ "$lang" = "en" ]; then
       echo "=== Optimize Menu ==="
       echo "  1) Optimize: LSCWP (enable)"
-      echo "  2) Optimize: baseline cleanup (coming soon)"
+      echo "  2) Baseline cleanup (default plugins + sample content)"
       echo "  3) Optimize: permalinks (coming soon)"
       echo "  4) Optimize: indexing policy (coming soon)"
       echo "  5) Optimize: REST API /wp-json check"
@@ -670,7 +768,7 @@ show_optimize_menu() {
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
-      echo "  2) Optimize：基线清理（即将推出）"
+      echo "  2) 基线清理（默认插件 + 示例内容）"
       echo "  3) Optimize：固定链接（即将推出）"
       echo "  4) Optimize：索引策略（即将推出）"
       echo "  5) Optimize：REST API /wp-json 检查"
@@ -684,12 +782,17 @@ show_optimize_menu() {
         optimize_finish_menu
         return
         ;;
+      2)
+        opt_task_baseline_cleanup
+        optimize_finish_menu
+        return
+        ;;
       5)
         opt_task_rest_api_check
         optimize_finish_menu
         return
         ;;
-      2|3|4)
+      3|4)
         if [ "$lang" = "en" ]; then
           echo "Coming soon."
         else
