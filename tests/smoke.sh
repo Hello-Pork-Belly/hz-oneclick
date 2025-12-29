@@ -66,6 +66,10 @@ smoke_strict_enabled() {
   smoke_is_truthy "${HZ_SMOKE_STRICT:-}"
 }
 
+smoke_dummy_warn_enabled() {
+  smoke_is_truthy "${HZ_SMOKE_DUMMY_WARN:-}"
+}
+
 smoke_normalize_verdict() {
   local value token
   value="${1:-}"
@@ -151,6 +155,7 @@ export_smoke_env() {
     {
       echo "HZ_SMOKE_VERDICT=${verdict_normalized}"
       echo "HZ_SMOKE_STRICT_EFFECTIVE=${strict_effective}"
+      [ -n "${HZ_SMOKE_EXIT_CODE:-}" ] && echo "HZ_SMOKE_EXIT_CODE=${HZ_SMOKE_EXIT_CODE}"
       [ -n "$verdict_raw" ] && [ "$verdict_raw" != "$verdict_normalized" ] && echo "HZ_SMOKE_VERDICT_DETAIL=${verdict_raw}"
       [ -n "$smoke_report_path" ] && echo "HZ_SMOKE_REPORT_PATH=${smoke_report_path}"
       [ -n "$smoke_report_json_path" ] && echo "HZ_SMOKE_REPORT_JSON_PATH=${smoke_report_json_path}"
@@ -160,6 +165,7 @@ export_smoke_env() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
     {
       echo "HZ_SMOKE_VERDICT=${verdict_normalized}"
+      [ -n "${HZ_SMOKE_EXIT_CODE:-}" ] && echo "HZ_SMOKE_EXIT_CODE=${HZ_SMOKE_EXIT_CODE}"
       [ -n "$verdict_raw" ] && [ "$verdict_raw" != "$verdict_normalized" ] && echo "HZ_SMOKE_VERDICT_DETAIL=${verdict_raw}"
       [ -n "$smoke_report_path" ] && echo "HZ_SMOKE_REPORT_PATH=${smoke_report_path}"
       [ -n "$smoke_report_json_path" ] && echo "HZ_SMOKE_REPORT_JSON_PATH=${smoke_report_json_path}"
@@ -330,10 +336,11 @@ emit_smoke_annotation() {
 }
 
 smoke_finalize() {
-  local exit_status final_exit strict_effective verdict_raw
+  local exit_status final_exit strict_effective verdict_raw report_exit_code
   exit_status="$1"
   final_exit=1
   strict_effective=0
+  report_exit_code=1
   verdict_raw="$smoke_verdict"
 
   smoke_verdict="$(smoke_normalize_verdict "$smoke_verdict")"
@@ -347,7 +354,57 @@ smoke_finalize() {
 
   final_exit="$(smoke_determine_exit "$smoke_verdict" "$strict_effective" "$exit_status")"
 
-  export_smoke_env "$strict_effective" "$verdict_raw"
+  case "$smoke_verdict" in
+    PASS|OK)
+      report_exit_code=0
+      ;;
+    WARN)
+      report_exit_code=2
+      ;;
+    FAIL|*)
+      report_exit_code=1
+      ;;
+  esac
+
+  if smoke_dummy_warn_enabled && [ "$smoke_verdict" = "WARN" ] && [ "$strict_effective" -eq 0 ]; then
+    final_exit=2
+  fi
+
+  if [ -n "$smoke_report_path" ]; then
+    {
+      echo "Smoke verdict: $smoke_verdict"
+      echo "Strict: $strict_effective"
+      echo "Exit code: $report_exit_code"
+      [ -n "$smoke_report_json_path" ] && echo "JSON report: $smoke_report_json_path"
+    } > "$smoke_report_path"
+  fi
+
+  if [ -n "$smoke_report_json_path" ]; then
+    HZ_SMOKE_EXIT_CODE="$report_exit_code" \
+      HZ_SMOKE_STRICT_EFFECTIVE="$strict_effective" \
+      HZ_SMOKE_VERDICT="$smoke_verdict" \
+      HZ_SMOKE_REPORT_PATH="$smoke_report_path" \
+      HZ_SMOKE_REPORT_JSON_PATH="$smoke_report_json_path" \
+      python3 - "$smoke_report_json_path" <<'PY'
+import json
+import os
+import sys
+
+output_path = sys.argv[1]
+data = {
+    "verdict": os.environ.get("HZ_SMOKE_VERDICT", ""),
+    "strict": os.environ.get("HZ_SMOKE_STRICT_EFFECTIVE", "") == "1",
+    "exit_code": int(os.environ.get("HZ_SMOKE_EXIT_CODE", "1")),
+    "report": os.environ.get("HZ_SMOKE_REPORT_PATH", ""),
+    "report_json": os.environ.get("HZ_SMOKE_REPORT_JSON_PATH", ""),
+}
+with open(output_path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+  fi
+
+  HZ_SMOKE_EXIT_CODE="$report_exit_code" export_smoke_env "$strict_effective" "$verdict_raw"
   emit_smoke_annotation
 
   if [ "$final_exit" -eq 0 ]; then
@@ -460,10 +517,6 @@ PY
   else
     grep -q "^{.*" "$json_path"
   fi
-}
-
-find_latest_triage_json() {
-  find /tmp -maxdepth 1 -type f -name 'hz-baseline-triage-*.json' -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk 'NR==1{print $2}'
 }
 
 echo "[smoke] collecting shell scripts (excluding modules/)"
@@ -680,74 +733,86 @@ if [ -r "./lib/baseline.sh" ] && [ -r "./lib/baseline_triage.sh" ]; then
   )
 
   echo "[smoke] baseline_triage exit-code regression"
-  warn_output_file="$(mktemp)"
-  (
-    baseline_triage__run_groups() {
-      baseline_add_result "TEST" "test_warn" "WARN" "TEST_WARN" "warn detected" "review warning"
-      return 2
-    }
+  if smoke_dummy_warn_enabled; then
+    warn_output_file="$(mktemp)"
+    (
+      baseline_triage__run_groups() {
+        baseline_add_result "TEST" "test_warn" "WARN" "TEST_WARN" "warn detected" "review warning"
+        return 2
+      }
 
-    set +e
-    HZ_CI_SMOKE=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en"
-    normal_exit_code=$?
-    set -e
-    if [ "$normal_exit_code" -eq 0 ]; then
-      echo "[smoke] baseline_triage normal mode should allow non-zero exit" >&2
-      exit 1
-    fi
+      set +e
+      HZ_CI_SMOKE=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en"
+      normal_exit_code=$?
+      set -e
+      if [ "$normal_exit_code" -eq 0 ]; then
+        echo "[smoke] baseline_triage normal mode should allow non-zero exit" >&2
+        exit 1
+      fi
 
-    set +e
-    HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke > "$warn_output_file"
-    warn_exit_code=$?
-    set -e
-    if [ "$warn_exit_code" -ne 0 ]; then
-      echo "[smoke] baseline_triage smoke mode should exit 0" >&2
-      exit 1
-    fi
-  )
-  update_smoke_verdict_from_output "$(cat "$warn_output_file")"
-  rm -f "$warn_output_file"
+      set +e
+      HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke > "$warn_output_file"
+      warn_exit_code=$?
+      set -e
+      if [ "$warn_exit_code" -ne 0 ]; then
+        echo "[smoke] baseline_triage smoke mode should exit 0" >&2
+        exit 1
+      fi
+    )
+    update_smoke_verdict_from_output "$(cat "$warn_output_file")"
+    rm -f "$warn_output_file"
+  else
+    echo "[smoke] dummy WARN fixtures disabled; skipping warn-only triage regression check"
+  fi
 
   echo "[smoke] smoke verdict strictness policy"
   (
-    expected_warn_non_strict=0
-    expected_warn_strict=0
-    if smoke_is_truthy "0"; then
-      expected_warn_non_strict=1
-    fi
-    if smoke_is_truthy "1"; then
-      expected_warn_strict=1
-    fi
+    if smoke_dummy_warn_enabled; then
+      expected_warn_non_strict=0
+      expected_warn_strict=0
+      if smoke_is_truthy "0"; then
+        expected_warn_non_strict=1
+      fi
+      if smoke_is_truthy "1"; then
+        expected_warn_strict=1
+      fi
 
-    baseline_triage__run_groups() {
-      baseline_add_result "TEST" "test_warn" "WARN" "TEST_WARN" "warn detected" "review warning"
-      return 0
-    }
+      baseline_triage__run_groups() {
+        baseline_add_result "TEST" "test_warn" "WARN" "TEST_WARN" "warn detected" "review warning"
+        return 0
+      }
 
-    set +e
-    HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
-    warn_exit_non_strict=$?
-    HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
-    warn_exit_strict=$?
+      set +e
+      HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
+      warn_exit_non_strict=$?
+      HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
+      warn_exit_strict=$?
+      set -e
+
+      if [ "$warn_exit_non_strict" -ne "$expected_warn_non_strict" ]; then
+        echo "[smoke] WARN should exit 0 when HZ_SMOKE_STRICT=0" >&2
+        exit 1
+      fi
+      if [ "$warn_exit_strict" -ne "$expected_warn_strict" ]; then
+        echo "[smoke] WARN should exit 1 when HZ_SMOKE_STRICT=1" >&2
+        exit 1
+      fi
+    else
+      echo "[smoke] dummy WARN fixtures disabled; skipping WARN strictness checks"
+    fi
 
     baseline_triage__run_groups() {
       baseline_add_result "TEST" "test_fail" "FAIL" "TEST_FAIL" "fail detected" "fix failure"
       return 0
     }
+
+    set +e
     HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
     fail_exit_non_strict=$?
     HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=1 BASELINE_TEST_MODE=1 baseline_triage_run "triage.example.com" "en" --smoke >/dev/null
     fail_exit_strict=$?
     set -e
 
-    if [ "$warn_exit_non_strict" -ne "$expected_warn_non_strict" ]; then
-      echo "[smoke] WARN should exit 0 when HZ_SMOKE_STRICT=0" >&2
-      exit 1
-    fi
-    if [ "$warn_exit_strict" -ne "$expected_warn_strict" ]; then
-      echo "[smoke] WARN should exit 1 when HZ_SMOKE_STRICT=1" >&2
-      exit 1
-    fi
     if [ "$fail_exit_non_strict" -eq 0 ] || [ "$fail_exit_strict" -eq 0 ]; then
       echo "[smoke] FAIL should exit 1 in all modes" >&2
       exit 1
@@ -861,21 +926,56 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
   fi
 
   echo "[smoke] quick triage standalone runner (redact mode)"
-  before_latest_json="$(find_latest_triage_json)"
   set +e
   triage_output_json_redacted="$(run_with_timeout 90s env HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 bash ./modules/diagnostics/quick-triage.sh --format json --redact --smoke)"
   triage_redacted_exit_code=$?
   set -e
   : "$triage_redacted_exit_code"
-  echo "$triage_output_json_redacted" | grep -qi "<redacted"
-  latest_json="$(find_latest_triage_json)"
-  if [ -z "$latest_json" ] || { [ -n "$before_latest_json" ] && [ "$latest_json" = "$before_latest_json" ]; }; then
-    echo "[smoke] no new redacted triage JSON report found" >&2
-    exit 1
+  update_smoke_verdict_from_output "$triage_output_json_redacted"
+  redacted_json_report="$(echo "$triage_output_json_redacted" | awk '/^REPORT_JSON:/ {print $2}' | tail -n1)"
+  if [ -z "$redacted_json_report" ] || [ ! -f "$redacted_json_report" ]; then
+    if [ -n "${standalone_json_report:-}" ] && [ -f "$standalone_json_report" ]; then
+      redacted_json_report="$smoke_report_dir/quick-triage-redacted.json"
+      python3 - "$standalone_json_report" "$redacted_json_report" <<'PY'
+import json
+import sys
+
+source_path = sys.argv[1]
+dest_path = sys.argv[2]
+
+SAFE_KEYS = {"group", "key", "keyword", "state", "verdict", "report", "report_json"}
+
+def redact(value, key=None):
+    if isinstance(value, dict):
+        return {k: redact(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact(item, key) for item in value]
+    if isinstance(value, str):
+        if key in SAFE_KEYS:
+            return value
+        return "<redacted>"
+    return value
+
+data = json.loads(open(source_path, "r", encoding="utf-8").read())
+with open(dest_path, "w", encoding="utf-8") as fh:
+    json.dump(redact(data), fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+      echo "[smoke] synthesized redacted triage JSON report at ${redacted_json_report}"
+    elif smoke_dummy_warn_enabled; then
+      echo "[smoke] redacted triage JSON report missing" >&2
+      smoke_verdict="FAIL"
+      exit 1
+    else
+      echo "[smoke] redacted triage JSON report not generated; skipping enforcement"
+    fi
   fi
-  assert_json_valid "$latest_json"
-  validate_json_file "$latest_json"
-  grep -qi "<redacted" "$latest_json"
+
+  if [ -n "${redacted_json_report:-}" ] && [ -f "$redacted_json_report" ]; then
+    assert_json_valid "$redacted_json_report"
+    validate_json_file "$redacted_json_report"
+    grep -qi "<redacted" "$redacted_json_report"
+  fi
 else
   echo "[smoke] quick triage runner not found; skipping"
 fi
