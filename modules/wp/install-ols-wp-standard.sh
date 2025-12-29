@@ -637,6 +637,54 @@ opt_task_theme_cleanup() {
   return 1
 }
 
+opt_task_plugin_cleanup() {
+  local lang wp_path
+  local inactive_plugins_raw inactive_plugins=()
+  lang="$(get_finish_lang)"
+
+  log_step "Optimize: Plugin cleanup (inactive plugins)"
+  if ! opt_prepare_context; then
+    return 1
+  fi
+
+  if ! ensure_wp_cli; then
+    if [ "$lang" = "en" ]; then
+      log_warn "wp-cli not ready; skip plugin cleanup."
+    else
+      log_warn "wp-cli 未就绪，跳过插件清理。"
+    fi
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  inactive_plugins_raw="$(wp --path="$wp_path" --allow-root plugin list --status=inactive --field=name --skip-plugins --skip-themes 2>/dev/null || true)"
+  read -r -a inactive_plugins <<<"$inactive_plugins_raw"
+  if [ "${#inactive_plugins[@]}" -eq 0 ]; then
+    if [ "$lang" = "en" ]; then
+      log_info "No inactive plugins to delete."
+    else
+      log_info "无可删除的未启用插件。"
+    fi
+    return 0
+  fi
+
+  if wp --path="$wp_path" --allow-root plugin uninstall "${inactive_plugins[@]}" --delete --skip-plugins --skip-themes --quiet; then
+    if [ "$lang" = "en" ]; then
+      log_ok "Inactive plugins removed: ${inactive_plugins[*]}"
+    else
+      log_ok "未启用插件已清理：${inactive_plugins[*]}"
+    fi
+    return 0
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_warn "Plugin cleanup failed."
+  else
+    log_warn "插件清理失败。"
+  fi
+  return 1
+}
+
 opt_task_permalinks() {
   local lang
   lang="$(get_finish_lang)"
@@ -879,8 +927,9 @@ show_optimize_menu() {
       echo "  6) Optimize: Site Health snapshot"
       echo "  7) Optimize: WP core integrity (verify checksums)"
       echo "  8) Optimize: Theme cleanup (default themes)"
+      echo "  9) Optimize: Plugin cleanup (inactive plugins)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-8]: " choice
+      read -rp "Choose [0-9]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -891,8 +940,9 @@ show_optimize_menu() {
       echo "  6) Optimize：站点健康快照"
       echo "  7) Optimize：WP 核心完整性（校验）"
       echo "  8) Optimize：主题清理（默认主题）"
+      echo "  9) Optimize：清理插件（未启用插件）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-8]: " choice
+      read -rp "请输入选项 [0-9]: " choice
     fi
 
     case "$choice" in
@@ -946,6 +996,14 @@ show_optimize_menu() {
         ;;
       8)
         if opt_task_theme_cleanup; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      9)
+        if opt_task_plugin_cleanup; then
           optimize_finish_menu
           return 0
         fi
