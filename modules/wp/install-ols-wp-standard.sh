@@ -1003,6 +1003,121 @@ opt_task_security_snapshot() {
   return 0
 }
 
+opt_task_hardening_check() {
+  local lang wp_path report_path wp_version site_url home_url
+  local admin_users_raw admin_users_count wp_config_path
+  local const value const_line world_writable_count world_writable_list
+  lang="$(get_finish_lang)"
+
+  log_step "Optimize: Hardening check"
+  if ! opt_prepare_context; then
+    return 1
+  fi
+
+  if ! ensure_wp_cli; then
+    if [ "$lang" = "en" ]; then
+      log_warn "wp-cli not ready; skip Hardening check."
+    else
+      log_warn "wp-cli 未就绪，跳过加固检查。"
+    fi
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  report_path="/tmp/hz-wp-hardening-check.txt"
+  wp_config_path="${wp_path}/wp-config.php"
+
+  : >"$report_path"
+
+  wp_version="$(wp --path="$wp_path" --allow-root core version --skip-plugins --skip-themes 2>/dev/null || true)"
+  site_url="$(wp --path="$wp_path" --allow-root option get siteurl --skip-plugins --skip-themes 2>/dev/null || true)"
+  home_url="$(wp --path="$wp_path" --allow-root option get home --skip-plugins --skip-themes 2>/dev/null || true)"
+  admin_users_raw="$(wp --path="$wp_path" --allow-root user list --role=administrator --fields=user_login --skip-plugins --skip-themes 2>/dev/null || true)"
+  admin_users_count="$(printf '%s\n' "$admin_users_raw" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+  {
+    echo "=== WordPress Hardening Check ==="
+    echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    echo "Site path: ${wp_path}"
+    echo
+    echo "WordPress version: ${wp_version:-unknown}"
+    echo "Site URL: ${site_url:-unknown}"
+    echo "Home URL: ${home_url:-unknown}"
+    echo
+    echo "Admin users (user_login):"
+    if [ -n "$admin_users_raw" ]; then
+      printf '%s\n' "$admin_users_raw"
+    else
+      echo "No admin users found or wp-cli failed."
+    fi
+    echo "Admin user count: ${admin_users_count:-0}"
+    echo
+    echo "wp-config.php:"
+  } >>"$report_path"
+
+  if [ -e "$wp_config_path" ]; then
+    if stat -c '%a %U:%G %n' "$wp_config_path" >/dev/null 2>&1; then
+      stat -c '%a %U:%G %n' "$wp_config_path" >>"$report_path"
+    elif stat -f '%Lp %Su:%Sg %N' "$wp_config_path" >/dev/null 2>&1; then
+      stat -f '%Lp %Su:%Sg %N' "$wp_config_path" >>"$report_path"
+    else
+      echo "stat unavailable for ${wp_config_path}" >>"$report_path"
+    fi
+  else
+    echo "Missing: ${wp_config_path}" >>"$report_path"
+  fi
+
+  {
+    echo
+    echo "wp-config constants (best-effort):"
+  } >>"$report_path"
+
+  for const in DISALLOW_FILE_EDIT WP_DEBUG WP_DEBUG_DISPLAY WP_AUTO_UPDATE_CORE AUTOMATIC_UPDATER_DISABLED; do
+    const_line=""
+    value=""
+    if [ -f "$wp_config_path" ]; then
+      const_line="$(grep -E "^[[:space:]]*define\\(\\s*['\"]${const}['\"]" "$wp_config_path" | head -n 1 || true)"
+      if [ -n "$const_line" ]; then
+        value="$(printf '%s' "$const_line" | sed -E "s/.*define\\(\\s*['\"]${const}['\"]\\s*,\\s*([^)]*)\\).*/\\1/")"
+        if [ -z "$value" ] || [ "$value" = "$const_line" ]; then
+          value="set (unable to parse)"
+        fi
+      fi
+    fi
+    if [ -n "$const_line" ]; then
+      echo "${const}: ${value}" >>"$report_path"
+    else
+      echo "${const}: not set" >>"$report_path"
+    fi
+  done
+
+  {
+    echo
+    echo "World-writable paths (other-writable bit) under site root:"
+  } >>"$report_path"
+
+  if [ -d "$wp_path" ]; then
+    world_writable_count="$(find "$wp_path" -xdev -perm -0002 2>/dev/null | wc -l | tr -d ' ')"
+    world_writable_list="$(find "$wp_path" -xdev -perm -0002 2>/dev/null | head -n 20)"
+    echo "Count: ${world_writable_count:-0}" >>"$report_path"
+    if [ -n "$world_writable_list" ]; then
+      echo "Paths (up to 20):" >>"$report_path"
+      printf '%s\n' "$world_writable_list" >>"$report_path"
+    else
+      echo "Paths (up to 20): none found" >>"$report_path"
+    fi
+  else
+    echo "Site path not found: ${wp_path}" >>"$report_path"
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_ok "Hardening check report saved: /tmp/hz-wp-hardening-check.txt"
+  else
+    log_ok "加固检查报告已保存：/tmp/hz-wp-hardening-check.txt"
+  fi
+  return 0
+}
+
 show_optimize_menu() {
   local lang choice
   lang="$(get_finish_lang)"
@@ -1031,8 +1146,9 @@ show_optimize_menu() {
       echo "  8) Optimize: Theme cleanup (default themes)"
       echo "  9) Optimize: Plugin cleanup (inactive plugins)"
       echo " 10) Optimize: Security snapshot"
+      echo " 11) Optimize: Hardening check"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-10]: " choice
+      read -rp "Choose [0-11]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -1045,8 +1161,9 @@ show_optimize_menu() {
       echo "  8) Optimize：主题清理（默认主题）"
       echo "  9) Optimize：清理插件（未启用插件）"
       echo " 10) Optimize：安全快照"
+      echo " 11) Optimize：加固检查"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-10]: " choice
+      read -rp "请输入选项 [0-11]: " choice
     fi
 
     case "$choice" in
@@ -1116,6 +1233,14 @@ show_optimize_menu() {
         ;;
       10)
         if opt_task_security_snapshot; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      11)
+        if opt_task_hardening_check; then
           optimize_finish_menu
           return 0
         fi
