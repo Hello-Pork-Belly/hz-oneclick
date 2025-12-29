@@ -147,6 +147,7 @@ recommend_machine_tier() {
   MACHINE_RECOMMENDED_TIER="$tier_label"
 }
 
+# Canonical machine profile + recommendation emitter (print once per run).
 print_machine_profile_and_recommendation() {
   local mem_display swap_display disk_display
 
@@ -352,6 +353,7 @@ show_lomp_lnmp_profile_menu() {
 
   while true; do
     clear
+    show_machine_profile_once
 
     if [ "$HZ_LANG" = "en" ]; then
       cyan "LOMP/LNMP Profile Selector"
@@ -387,6 +389,7 @@ show_lomp_lnmp_profile_menu() {
           echo "即将启动 LOMP-Lite（Frontend-only）..."
         fi
         HZ_ENTRY="menu" HZ_LANG="$HZ_LANG" HZ_WP_PROFILE="lomp-lite" HZ_INSTALL_BASE_URL="$HZ_INSTALL_BASE_URL" \
+          HZ_SUPPRESS_MACHINE_PROFILE=1 \
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/${HZ_WP_INSTALLER_SCRIPT}")
         return
         ;;
@@ -397,6 +400,7 @@ show_lomp_lnmp_profile_menu() {
           echo "即将启动 LOMP-Standard..."
         fi
         HZ_ENTRY="menu" HZ_LANG="$HZ_LANG" HZ_WP_PROFILE="lomp-standard" HZ_INSTALL_BASE_URL="$HZ_INSTALL_BASE_URL" \
+          HZ_SUPPRESS_MACHINE_PROFILE=1 \
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/${HZ_WP_INSTALLER_SCRIPT}")
         return
         ;;

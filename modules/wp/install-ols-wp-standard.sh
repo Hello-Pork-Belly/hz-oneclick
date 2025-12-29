@@ -2089,23 +2089,78 @@ print_system_summary() {
   echo -e "${RED}下一步建议: ${RECOMMENDED_NEXT_STEP}${NC}"
 }
 
-show_system_profile_once() {
-  if [ "${SYS_PROFILE_SHOWN}" -eq 0 ]; then
-    local ram
-    ram="$(get_ram_mb)"
-    if [ "$ram" -gt 0 ]; then
-      echo -e "当前检测到内存约: ${BOLD}${ram} MB${NC}"
-      if [ "$ram" -lt 3800 ]; then
-        log_warn "内存 < 4G，推荐选择 LOMP-Lite（Frontend-only），数据库/Redis 放到其他高配机器，通过内网或隧道访问。"
-      else
-        log_info "内存 ≥ 4G，可按需选择 Lite（Frontend-only）、Standard 或 Hub。"
-      fi
-    fi
+print_system_details() {
+  local lang os_display ipv4_display ipv6_display
 
-    detect_recommended_tier
-    print_system_summary
-    SYS_PROFILE_SHOWN=1
+  detect_system_profile
+  detect_public_ip
+
+  lang="$(get_finish_lang)"
+  os_display="$SYSTEM_OS_VERSION"
+  if [ -z "$os_display" ] || [ "$os_display" = "N/A" ]; then
+    if [ "$lang" = "en" ]; then
+      os_display="N/A (check /etc/os-release)"
+    else
+      os_display="N/A（可查看 /etc/os-release）"
+    fi
   fi
+
+  ipv4_display="$DETECTED_IPV4"
+  ipv6_display="$DETECTED_IPV6"
+  if [ "$ipv4_display" = "N/A" ]; then
+    if [ "$lang" = "en" ]; then
+      ipv4_display="N/A (use curl -4 ifconfig.me)"
+    else
+      ipv4_display="N/A（可使用 curl -4 ifconfig.me 手动查询）"
+    fi
+  fi
+  if [ "$ipv6_display" = "N/A" ]; then
+    if [ "$lang" = "en" ]; then
+      ipv6_display="N/A (use curl -6 ifconfig.me)"
+    else
+      ipv6_display="N/A（可使用 curl -6 ifconfig.me 手动查询）"
+    fi
+  fi
+
+  if [ "$lang" = "en" ]; then
+    echo -e "${CYAN}---- System details ----${NC}"
+    echo "OS version: ${os_display}"
+    echo "Public IPv4: ${ipv4_display}"
+    echo "Public IPv6: ${ipv6_display}"
+  else
+    echo -e "${CYAN}---- 系统信息（System details） ----${NC}"
+    echo "系统版本: ${os_display}"
+    echo "公网 IPv4: ${ipv4_display}"
+    echo "公网 IPv6: ${ipv6_display}"
+  fi
+}
+
+# Canonical machine profile + recommendation is owned by hz.sh.
+show_system_profile_once() {
+  if [ "${SYS_PROFILE_SHOWN}" -ne 0 ]; then
+    return
+  fi
+
+  if [ "${HZ_SUPPRESS_MACHINE_PROFILE:-0}" -eq 1 ]; then
+    print_system_details
+    SYS_PROFILE_SHOWN=1
+    return
+  fi
+
+  local ram
+  ram="$(get_ram_mb)"
+  if [ "$ram" -gt 0 ]; then
+    echo -e "当前检测到内存约: ${BOLD}${ram} MB${NC}"
+    if [ "$ram" -lt 3800 ]; then
+      log_warn "内存 < 4G，推荐选择 LOMP-Lite（Frontend-only），数据库/Redis 放到其他高配机器，通过内网或隧道访问。"
+    else
+      log_info "内存 ≥ 4G，可按需选择 Lite（Frontend-only）、Standard 或 Hub。"
+    fi
+  fi
+
+  detect_recommended_tier
+  print_system_summary
+  SYS_PROFILE_SHOWN=1
 }
 
 show_lnmp_placeholder() {
