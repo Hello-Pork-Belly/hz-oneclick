@@ -51,6 +51,7 @@ BOLD="\033[1m"
 NC="\033[0m"
 
 POST_SUMMARY_SHOWN=0
+SYS_PROFILE_SHOWN=0
 HTTPS_CHECKS_SHOWN=0
 SSL_MODE="none"
 SITE_SIZE_LIMIT_ENABLED="no"
@@ -1099,6 +1100,25 @@ print_system_summary() {
   echo -e "${RED}下一步建议: ${RECOMMENDED_NEXT_STEP}${NC}"
 }
 
+show_system_profile_once() {
+  if [ "${SYS_PROFILE_SHOWN}" -eq 0 ]; then
+    local ram
+    ram="$(get_ram_mb)"
+    if [ "$ram" -gt 0 ]; then
+      echo -e "当前检测到内存约: ${BOLD}${ram} MB${NC}"
+      if [ "$ram" -lt 3800 ]; then
+        log_warn "内存 < 4G，推荐选择 LOMP-Lite（Frontend-only），数据库/Redis 放到其他高配机器，通过内网或隧道访问。"
+      else
+        log_info "内存 ≥ 4G，可按需选择 Lite（Frontend-only）、Standard 或 Hub。"
+      fi
+    fi
+
+    detect_recommended_tier
+    print_system_summary
+    SYS_PROFILE_SHOWN=1
+  fi
+}
+
 show_lnmp_placeholder() {
   local tier_label
   tier_label="$1"
@@ -1231,21 +1251,9 @@ show_post_install_summary() {
 
 show_main_menu() {
   # [ANCHOR:MENU_MAIN]
-  local ram
-  ram="$(get_ram_mb)"
-
   echo
   echo -e "${BOLD}== LOMP / LNMP 安装模块 ==${NC}"
-  if [ "$ram" -gt 0 ]; then
-    echo -e "当前检测到内存约: ${BOLD}${ram} MB${NC}"
-    if [ "$ram" -lt 3800 ]; then
-      log_warn "内存 < 4G，推荐选择 LOMP-Lite（Frontend-only），数据库/Redis 放到其他高配机器，通过内网或隧道访问。"
-    else
-      log_info "内存 ≥ 4G，可按需选择 Lite（Frontend-only）、Standard 或 Hub。"
-    fi
-  fi
-
-  print_system_summary
+  show_system_profile_once
 
   echo
   echo "安装档位（LOMP / LNMP）："
@@ -4499,6 +4507,7 @@ install_frontend_only_flow() {
   LITE_PREFLIGHT_MODE=1
   BASELINE_TIER="$TIER_LITE"
   log_step "LOMP-Lite (Frontend-only): external DB/Redis"
+  show_system_profile_once
   prompt_site_info
 
   while :; do
@@ -4584,6 +4593,8 @@ install_standard_flow() {
   check_os
   LITE_PREFLIGHT_MODE=0
   BASELINE_TIER="$TIER_STANDARD"
+  log_step "LOMP-Standard: local DB/Redis"
+  show_system_profile_once
   prompt_site_info
 
   # 循环输入 DB 信息并测试连通性，直到成功或用户选择退出

@@ -379,10 +379,6 @@ show_lomp_lnmp_profile_menu() {
       read -rp "请输入选项: " choice
     fi
 
-    if echo "$choice" | grep -Eq '^[1-6]$'; then
-      show_machine_profile_once
-    fi
-
     case "$choice" in
       1)
         if [ "$HZ_LANG" = "en" ]; then
