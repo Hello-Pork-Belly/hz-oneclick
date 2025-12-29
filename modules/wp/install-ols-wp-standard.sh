@@ -742,6 +742,48 @@ opt_task_site_health_snapshot() {
   return 1
 }
 
+opt_task_core_checksums() {
+  local lang wp_path checksum_path
+  lang="$(get_finish_lang)"
+
+  log_step "Optimize: WP core integrity"
+  if ! opt_prepare_context; then
+    return 1
+  fi
+
+  if ! ensure_wp_cli; then
+    if [ "$lang" = "en" ]; then
+      log_warn "wp-cli not ready; skip core integrity check."
+    else
+      log_warn "wp-cli 未就绪，跳过核心完整性检查。"
+    fi
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  checksum_path="/tmp/hz-wp-checksums.txt"
+
+  if wp --path="$wp_path" --allow-root core verify-checksums --skip-plugins --skip-themes >"$checksum_path" 2>&1; then
+    if [ "$lang" = "en" ]; then
+      log_ok "WP core checksums verified."
+      log_info "Saved output: ${checksum_path}"
+    else
+      log_ok "WP 核心校验完成。"
+      log_info "输出已保存：${checksum_path}"
+    fi
+    return 0
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_warn "WP core checksum verification reported issues."
+    log_info "Core files may be modified/corrupted; review ${checksum_path}"
+  else
+    log_warn "WP 核心校验发现异常。"
+    log_info "核心文件可能被修改/损坏，请查看 ${checksum_path}"
+  fi
+  return 1
+}
+
 show_optimize_menu() {
   local lang choice
   lang="$(get_finish_lang)"
@@ -766,8 +808,9 @@ show_optimize_menu() {
       echo "  4) Optimize: Indexing policy"
       echo "  5) Optimize: REST API /wp-json check"
       echo "  6) Optimize: Site Health snapshot"
+      echo "  7) Optimize: WP core integrity (verify checksums)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-6]: " choice
+      read -rp "Choose [0-7]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -776,8 +819,9 @@ show_optimize_menu() {
       echo "  4) Optimize：索引策略"
       echo "  5) Optimize：REST API /wp-json 检查"
       echo "  6) Optimize：站点健康快照"
+      echo "  7) Optimize：WP 核心完整性（校验）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-6]: " choice
+      read -rp "请输入选项 [0-7]: " choice
     fi
 
     case "$choice" in
@@ -815,6 +859,14 @@ show_optimize_menu() {
         ;;
       6)
         if opt_task_site_health_snapshot; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      7)
+        if opt_task_core_checksums; then
           optimize_finish_menu
           return 0
         fi
