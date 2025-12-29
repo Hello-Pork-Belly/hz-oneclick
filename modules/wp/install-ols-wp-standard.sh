@@ -1118,6 +1118,153 @@ opt_task_hardening_check() {
   return 0
 }
 
+opt_task_wp_config_hardening_safe() {
+  local lang wp_path report_path wp_config_path
+  local had_constant applied backup_path timestamp
+  lang="$(get_finish_lang)"
+
+  log_step "Optimize: wp-config hardening (safe)"
+  if ! opt_prepare_context; then
+    return 1
+  fi
+
+  if ! ensure_wp_cli; then
+    if [ "$lang" = "en" ]; then
+      log_warn "wp-cli not ready; skip wp-config hardening."
+    else
+      log_warn "wp-cli 未就绪，跳过 wp-config 加固。"
+    fi
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  report_path="/tmp/hz-wp-config-hardening.txt"
+  wp_config_path="${wp_path}/wp-config.php"
+  had_constant="no"
+  applied="no"
+  backup_path=""
+
+  if [ ! -f "$wp_config_path" ]; then
+    if [ "$lang" = "en" ]; then
+      log_error "wp-config.php not found; cannot apply hardening."
+    else
+      log_error "未找到 wp-config.php，无法执行加固。"
+    fi
+    {
+      echo "wp path: ${wp_path}"
+      echo "constant existed before: ${had_constant}"
+      echo "changes applied: ${applied}"
+      echo "backup filename: none"
+    } >"$report_path"
+    return 1
+  fi
+
+  if grep -E "^[[:space:]]*define\\(\\s*['\"]DISALLOW_FILE_EDIT['\"]" "$wp_config_path" >/dev/null 2>&1; then
+    had_constant="yes"
+    if [ "$lang" = "en" ]; then
+      log_info "DISALLOW_FILE_EDIT already set; no changes needed."
+    else
+      log_info "DISALLOW_FILE_EDIT 已设置，无需修改。"
+    fi
+    {
+      echo "wp path: ${wp_path}"
+      echo "constant existed before: ${had_constant}"
+      echo "changes applied: ${applied}"
+      echo "backup filename: none"
+    } >"$report_path"
+    return 0
+  fi
+
+  timestamp="$(date '+%Y%m%d-%H%M%S')"
+  backup_path="${wp_config_path}.bak-${timestamp}"
+  if ! cp -p "$wp_config_path" "$backup_path" >/dev/null 2>&1; then
+    if [ "$lang" = "en" ]; then
+      log_error "Failed to create wp-config.php backup; aborting."
+    else
+      log_error "创建 wp-config.php 备份失败，已终止。"
+    fi
+    {
+      echo "wp path: ${wp_path}"
+      echo "constant existed before: ${had_constant}"
+      echo "changes applied: ${applied}"
+      echo "backup filename: none"
+    } >"$report_path"
+    return 1
+  fi
+
+  if python - "$wp_config_path" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8", errors="surrogateescape")
+
+if re.search(r"^[ \t]*define\(\s*['\"]DISALLOW_FILE_EDIT['\"]", text, re.M):
+    sys.exit(2)
+
+define_line = "define('DISALLOW_FILE_EDIT', true);"
+marker = "/* That's all, stop editing! Happy publishing. */"
+
+if marker in text:
+    new_text = text.replace(marker, f"{define_line}\n\n{marker}", 1)
+else:
+    match = re.search(r"\?>\s*$", text)
+    if match:
+        insert_at = match.start()
+        prefix = text[:insert_at].rstrip("\n")
+        suffix = text[insert_at:]
+        new_text = f"{prefix}\n{define_line}\n{suffix}"
+    else:
+        new_text = text.rstrip("\n") + "\n" + define_line + "\n"
+
+path.write_text(new_text, encoding="utf-8", errors="surrogateescape")
+PY
+  then
+    applied="yes"
+    if [ "$lang" = "en" ]; then
+      log_ok "wp-config hardening applied (DISALLOW_FILE_EDIT enabled)."
+    else
+      log_ok "wp-config 加固已应用（已启用 DISALLOW_FILE_EDIT）。"
+    fi
+  else
+    if cp -p "$backup_path" "$wp_config_path" >/dev/null 2>&1; then
+      if [ "$lang" = "en" ]; then
+        log_error "Failed to update wp-config.php; restored from backup."
+      else
+        log_error "更新 wp-config.php 失败，已从备份恢复。"
+      fi
+    else
+      if [ "$lang" = "en" ]; then
+        log_error "Failed to update wp-config.php; restore also failed."
+      else
+        log_error "更新 wp-config.php 失败，恢复也失败。"
+      fi
+    fi
+    {
+      echo "wp path: ${wp_path}"
+      echo "constant existed before: ${had_constant}"
+      echo "changes applied: ${applied}"
+      echo "backup filename: ${backup_path}"
+    } >"$report_path"
+    return 1
+  fi
+
+  {
+    echo "wp path: ${wp_path}"
+    echo "constant existed before: ${had_constant}"
+    echo "changes applied: ${applied}"
+    echo "backup filename: ${backup_path}"
+  } >"$report_path"
+
+  if [ "$lang" = "en" ]; then
+    log_info "Report saved: ${report_path}"
+  else
+    log_info "报告已保存：${report_path}"
+  fi
+  return 0
+}
+
 show_optimize_menu() {
   local lang choice
   lang="$(get_finish_lang)"
@@ -1147,8 +1294,9 @@ show_optimize_menu() {
       echo "  9) Optimize: Plugin cleanup (inactive plugins)"
       echo " 10) Optimize: Security snapshot"
       echo " 11) Optimize: Hardening check"
+      echo " 12) Optimize: wp-config hardening (safe)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-11]: " choice
+      read -rp "Choose [0-12]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -1162,8 +1310,9 @@ show_optimize_menu() {
       echo "  9) Optimize：清理插件（未启用插件）"
       echo " 10) Optimize：安全快照"
       echo " 11) Optimize：加固检查"
+      echo " 12) 优化：wp-config 轻量加固（安全）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-11]: " choice
+      read -rp "请输入选项 [0-12]: " choice
     fi
 
     case "$choice" in
@@ -1241,6 +1390,14 @@ show_optimize_menu() {
         ;;
       11)
         if opt_task_hardening_check; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      12)
+        if opt_task_wp_config_hardening_safe; then
           optimize_finish_menu
           return 0
         fi
