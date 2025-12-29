@@ -233,51 +233,276 @@ get_finish_lang() {
   fi
 }
 
+get_install_base_url() {
+  local base="${HZ_INSTALL_BASE_URL:-https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick/main}"
+  base="${base%/}"
+  printf "%s" "$base"
+}
+
+print_optimize_rerun_command() {
+  local base installer envs=()
+  base="$(get_install_base_url)"
+  installer="${base}/modules/wp/install-ols-wp-standard.sh"
+
+  envs+=("HZ_PHASE=optimize")
+  if [ -n "${HZ_ENTRY:-}" ]; then
+    envs+=("HZ_ENTRY=${HZ_ENTRY}")
+  fi
+  if [ -n "${HZ_LANG:-}" ]; then
+    envs+=("HZ_LANG=${HZ_LANG}")
+  fi
+  if [ -n "${HZ_WP_PROFILE:-}" ]; then
+    envs+=("HZ_WP_PROFILE=${HZ_WP_PROFILE}")
+  fi
+  if [ -n "${HZ_INSTALL_BASE_URL:-}" ]; then
+    envs+=("HZ_INSTALL_BASE_URL=${HZ_INSTALL_BASE_URL}")
+  fi
+  if [ -n "${SITE_DOMAIN:-}" ]; then
+    envs+=("SITE_DOMAIN=${SITE_DOMAIN}")
+  fi
+  if [ -n "${SITE_SLUG:-}" ]; then
+    envs+=("SITE_SLUG=${SITE_SLUG}")
+  fi
+  if [ -n "${DOC_ROOT:-}" ]; then
+    envs+=("DOC_ROOT=${DOC_ROOT}")
+  fi
+
+  printf "%s bash <(curl -fsSL \"%s\")\n" "${envs[*]}" "$installer"
+}
+
+resolve_optimize_site_context() {
+  local detected_doc_root=""
+  local slug=""
+  local domain=""
+  local wp_config_path=""
+  local site_url=""
+
+  if [ -n "${DOC_ROOT:-}" ] && [ -d "$DOC_ROOT" ]; then
+    detected_doc_root="$DOC_ROOT"
+  fi
+
+  if [ -z "$detected_doc_root" ] && [ -n "${SITE_SLUG:-}" ]; then
+    if [ -d "/var/www/${SITE_SLUG}/html" ]; then
+      detected_doc_root="/var/www/${SITE_SLUG}/html"
+    fi
+  fi
+
+  if [ -z "$detected_doc_root" ] && [ -n "${SITE_DOMAIN:-}" ]; then
+    slug="${SITE_DOMAIN%%.*}"
+    if [ -n "$slug" ] && [ -d "/var/www/${slug}/html" ]; then
+      detected_doc_root="/var/www/${slug}/html"
+      SITE_SLUG="${SITE_SLUG:-$slug}"
+    fi
+  fi
+
+  if [ -z "$detected_doc_root" ]; then
+    wp_config_path="$(find /var/www -maxdepth 4 -type f -name wp-config.php -print -quit 2>/dev/null || true)"
+    if [ -n "$wp_config_path" ]; then
+      detected_doc_root="$(dirname "$wp_config_path")"
+    fi
+  fi
+
+  if [ -n "$detected_doc_root" ]; then
+    DOC_ROOT="$detected_doc_root"
+    if [ -z "${SITE_SLUG:-}" ]; then
+      slug="$(basename "$(dirname "$detected_doc_root")")"
+      if [ -n "$slug" ] && [ "$slug" != "/" ]; then
+        SITE_SLUG="$slug"
+      fi
+    fi
+  fi
+
+  if [ -z "${SITE_DOMAIN:-}" ] && command -v wp >/dev/null 2>&1; then
+    if [ -n "${DOC_ROOT:-}" ] && [ -d "$DOC_ROOT" ]; then
+      site_url="$(wp --path="$DOC_ROOT" --allow-root option get home --skip-plugins --skip-themes 2>/dev/null || true)"
+      if [ -z "$site_url" ]; then
+        site_url="$(wp --path="$DOC_ROOT" --allow-root option get siteurl --skip-plugins --skip-themes 2>/dev/null || true)"
+      fi
+      site_url="${site_url%/}"
+      site_url="${site_url#http://}"
+      site_url="${site_url#https://}"
+      site_url="${site_url%%/*}"
+      domain="$site_url"
+      if [ -n "$domain" ]; then
+        SITE_DOMAIN="$domain"
+      fi
+    fi
+  fi
+}
+
+is_openlitespeed_active() {
+  if [ -d /usr/local/lsws ]; then
+    return 0
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl list-unit-files 2>/dev/null | grep -q '^lsws\.service'; then
+      return 0
+    fi
+  fi
+
+  if command -v dpkg >/dev/null 2>&1; then
+    if dpkg -l | grep -q '^ii[[:space:]]\+openlitespeed[[:space:]]'; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+optimize_finish_menu() {
+  local lang choice
+  lang="$(get_finish_lang)"
+
+  if [ ! -t 0 ]; then
+    return 0
+  fi
+
+  while true; do
+    echo
+    if [ "$lang" = "en" ]; then
+      echo "=== Optimize Complete ==="
+      echo "  1) Return to main menu"
+      echo "  0) Exit"
+      read -rp "Choose [0-1]: " choice
+    else
+      echo "=== Optimize 完成 ==="
+      echo "  1) 返回主菜单"
+      echo "  0) 退出"
+      read -rp "请输入选项 [0-1]: " choice
+    fi
+
+    case "$choice" in
+      1)
+        if is_menu_context; then
+          show_main_menu
+          return
+        fi
+        if [ "$lang" = "en" ]; then
+          echo "Not in menu mode, exiting."
+        else
+          echo "当前不是菜单模式，退出。"
+        fi
+        exit 0
+        ;;
+      0)
+        exit 0
+        ;;
+      *)
+        if [ "$lang" = "en" ]; then
+          echo "Invalid choice, please try again."
+        else
+          echo "无效选项，请重试。"
+        fi
+        ;;
+    esac
+  done
+}
+
 # [ANCHOR:OPTIMIZE_PHASE]
 run_optimize_phase() {
   local lang
+  local wp_path
+  local summary=()
   lang="$(get_finish_lang)"
 
-  log_step "Optimize (optional)"
+  log_step "Optimize (post-install)"
   if [ "$lang" = "en" ]; then
-    echo "Optional post-install optimize phase."
+    echo "Post-install optimize phase."
   else
-    echo "可选的 Optimize 阶段（安装/启用 LSCWP + 基线优化 等）。"
+    echo "安装后 Optimize 阶段。"
   fi
 
-  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "${DOC_ROOT:-}" ]; then
+  resolve_optimize_site_context
+  wp_path="${DOC_ROOT:-}"
+
+  if [ -z "$wp_path" ] || [ ! -d "$wp_path" ]; then
     if [ "$lang" = "en" ]; then
-      log_warn "DOC_ROOT not detected; skip optimize."
+      log_warn "Site root not detected; skip optimize."
     else
-      log_warn "未检测到 DOC_ROOT，跳过 Optimize。"
+      log_warn "未检测到站点目录，跳过 Optimize。"
     fi
-    return 0
+    return 1
   fi
 
-  if ! command -v wp >/dev/null 2>&1; then
+  if ! ensure_wp_cli; then
     if [ "$lang" = "en" ]; then
-      log_warn "wp-cli not found; skip optimize."
+      log_warn "wp-cli not ready; skip optimize."
     else
-      log_warn "未检测到 wp-cli，跳过 Optimize。"
+      log_warn "wp-cli 未就绪，跳过 Optimize。"
     fi
-    return 0
+    return 1
   fi
 
-  if ! wp --path="$DOC_ROOT" core is-installed >/dev/null 2>&1; then
+  if ! wp --path="$wp_path" --allow-root core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
     if [ "$lang" = "en" ]; then
-      log_warn "WordPress core is not installed yet; skip optimize."
+      log_warn "WordPress not installed yet; please finish /wp-admin/install.php first, then re-run Optimize."
+      echo "Re-run command:"
     else
-      log_warn "WordPress 尚未初始化，跳过 Optimize。"
+      log_warn "WordPress 尚未安装；请先完成 /wp-admin/install.php，然后重新运行 Optimize。"
+      echo "重新运行命令："
     fi
-    return 0
+    print_optimize_rerun_command
+    return 1
   fi
 
-  if wp --path="$DOC_ROOT" core version >/dev/null 2>&1; then
+  if [ "$lang" = "en" ]; then
+    log_info "Detected site root: ${wp_path}"
+  else
+    log_info "已检测站点目录：${wp_path}"
+  fi
+  if [ -n "${SITE_DOMAIN:-}" ]; then
     if [ "$lang" = "en" ]; then
-      log_info "wp-cli is ready; optimize actions will be added in later steps."
+      log_info "Detected domain: ${SITE_DOMAIN}"
     else
-      log_info "wp-cli 已就绪；后续步骤将补充 Optimize 动作。"
+      log_info "已检测域名：${SITE_DOMAIN}"
     fi
+  fi
+
+  if is_openlitespeed_active; then
+    if wp --path="$wp_path" --allow-root plugin install litespeed-cache --activate --skip-plugins --skip-themes >/dev/null 2>&1; then
+      summary+=("LSCWP")
+      if [ "$lang" = "en" ]; then
+        log_info "LiteSpeed Cache installed and activated."
+      else
+        log_info "LiteSpeed Cache 已安装并启用。"
+      fi
+    else
+      if [ "$lang" = "en" ]; then
+        log_warn "LiteSpeed Cache install/activation failed."
+      else
+        log_warn "LiteSpeed Cache 安装/启用失败。"
+      fi
+    fi
+  fi
+
+  apply_wp_site_health_baseline
+  summary+=("baseline")
+
+  ensure_wp_permalink_structure
+  summary+=("permalink")
+
+  ensure_wp_indexing_policy
+  summary+=("indexing-policy")
+
+  ensure_wp_cache
+  ensure_lscwp_page_cache_detect
+
+  ensure_wp_loopback_and_rest_health
+  if [ -t 0 ] && [ -t 1 ]; then
+    run_loopback_preflight
+  else
+    if [ "$lang" = "en" ]; then
+      log_info "Non-interactive mode: skipping loopback preflight prompts."
+    else
+      log_info "非交互模式：跳过 Loopback 预检交互提示。"
+    fi
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_info "Optimize completed: ${summary[*]}"
+  else
+    log_info "Optimize 已完成：${summary[*]}"
   fi
 }
 
@@ -288,10 +513,11 @@ finish_menu() {
 
   if [ ! -t 0 ]; then
     if [ "$lang" = "en" ]; then
-      echo "Install finished (non-interactive). To run optimize: re-run with OPTIMIZE=1."
+      echo "Install finished (non-interactive). To run optimize, re-run with HZ_PHASE=optimize:"
     else
-      echo "安装完成（非交互）。如需运行 Optimize，请重新运行并加 OPTIMIZE=1。"
+      echo "安装完成（非交互）。如需运行 Optimize，请重新运行并加 HZ_PHASE=optimize："
     fi
+    print_optimize_rerun_command
     exit 0
   fi
 
@@ -304,9 +530,9 @@ finish_menu() {
       else
         echo "  1) Return to main menu (menu mode only)"
       fi
-      echo "  2) Run Optimize now (optional: install/enable LSCWP + baseline tuning)"
-      echo "  3) Exit"
-      read -rp "Choose [1-3]: " choice
+      echo "  2) Run Optimize (post-install)"
+      echo "  0) Exit"
+      read -rp "Choose [0-2]: " choice
     else
       echo "=== 安装完成菜单 ==="
       if is_menu_context; then
@@ -314,9 +540,9 @@ finish_menu() {
       else
         echo "  1) 返回主菜单（仅菜单模式）"
       fi
-      echo "  2) 运行 Optimize（可选：安装/启用 LSCWP + 基线优化）"
-      echo "  3) 退出"
-      read -rp "请输入选项 [1-3]: " choice
+      echo "  2) 运行 Optimize（安装后）"
+      echo "  0) 退出"
+      read -rp "请输入选项 [0-2]: " choice
     fi
 
     case "$choice" in
@@ -334,8 +560,10 @@ finish_menu() {
         ;;
       2)
         run_optimize_phase
+        optimize_finish_menu
+        return
         ;;
-      3)
+      0)
         exit 0
         ;;
       *)
@@ -351,6 +579,11 @@ finish_menu() {
 
 finish_install_flow() {
   finish_menu
+}
+
+run_optimize_only_flow() {
+  run_optimize_phase
+  optimize_finish_menu
 }
 
 trap 'log_error "脚本执行中断（行号: $LINENO）。"; exit 1' ERR
@@ -5101,6 +5334,11 @@ install_lomp_flow() {
 #######################
 
 # [ANCHOR:ENTRYPOINT]
+if [ "${HZ_PHASE:-}" = "optimize" ]; then
+  run_optimize_only_flow
+  exit 0
+fi
+
 if ! run_wp_profile_override; then
   show_main_menu
 fi
