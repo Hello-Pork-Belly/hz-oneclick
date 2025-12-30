@@ -26,6 +26,8 @@ BASELINE_TRIAGE_LIB="${REPO_ROOT}/lib/baseline_triage.sh"
 cd /
 
 # install-lomp-lnmp-standard.sh
+# Version: v1.0.0-beta.1
+# Date: 2025-12-31
 # 更新记录:
 # - v0.9:
 #   - 完成"彻底移除本机 OLS""按 slug 清理站点"后，不再直接退出脚本，
@@ -472,18 +474,24 @@ optimize_finish_menu() {
     echo
     if [ "$lang" = "en" ]; then
       echo "=== Optimize Complete ==="
-      echo "  1) Return to main menu"
+      echo "  1) Return to Optimize menu"
+      echo "  2) Return to main menu"
       echo "  0) Exit"
-      read -rp "Choose [0-1]: " choice
+      read -rp "Choose [0-2]: " choice
     else
       echo "=== Optimize 完成 ==="
-      echo "  1) 返回主菜单"
+      echo "  1) 返回 Optimize 菜单"
+      echo "  2) 返回主菜单"
       echo "  0) 退出"
-      read -rp "请输入选项 [0-1]: " choice
+      read -rp "请输入选项 [0-2]: " choice
     fi
 
     case "$choice" in
       1)
+        show_optimize_menu
+        return
+        ;;
+      2)
         if is_menu_context; then
           show_main_menu
           return
@@ -2435,7 +2443,7 @@ show_optimize_menu() {
     if [ "$lang" = "en" ]; then
       echo "=== Optimize Menu ==="
       echo "  1) Optimize: LSCWP (enable)"
-      echo "  2) Optimize: baseline cleanup (coming soon)"
+      echo "  2) Optimize: baseline cleanup"
       echo "  3) Optimize: Permalinks"
       echo "  4) Optimize: Indexing policy"
       echo "  5) Optimize: REST API /wp-json check"
@@ -2457,7 +2465,7 @@ show_optimize_menu() {
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
-      echo "  2) Optimize：基线清理（即将推出）"
+      echo "  2) Optimize：基线清理"
       echo "  3) Optimize：固定链接"
       echo "  4) Optimize：索引策略"
       echo "  5) Optimize：REST API /wp-json 检查"
@@ -2481,6 +2489,14 @@ show_optimize_menu() {
     case "$choice" in
       1)
         if opt_task_lscwp; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      2)
+        if opt_task_baseline_cleanup; then
           optimize_finish_menu
           return 0
         fi
@@ -2614,13 +2630,6 @@ show_optimize_menu() {
         fi
         optimize_finish_menu
         return 1
-        ;;
-      2)
-        if [ "$lang" = "en" ]; then
-          echo "Coming soon."
-        else
-          echo "即将推出。"
-        fi
         ;;
       0)
         if is_menu_context; then
@@ -7609,10 +7618,10 @@ run_loopback_preflight() {
 
   echo
   log_warn "部分环境无法从服务器自身稳定访问 HTTPS 域名，这会导致 REST API/loopback 检查报错。"
-  echo "  1) 应用本地 hosts loopback 修复（推荐）"
+  echo "  1) 应用修复（写入 /etc/hosts，推荐）"
   echo "  2) 跳过（仅提供手动指引）"
   echo
-  read -rp "请选择 [1-2，默认 2]: " loopback_choice
+  read -rp "请选择 [1-2，默认 2]（1=应用修复，2=跳过）: " loopback_choice
   loopback_choice="${loopback_choice:-2}"
 
   case "$loopback_choice" in
