@@ -5890,12 +5890,81 @@ install_packages() {
   # [ANCHOR:INSTALL_OLS]
   log_step "安装 / 检查 LOMP Web/PHP 组件（OpenLiteSpeed）"
 
-  apt update
-  apt install -y software-properties-common curl
+  export DEBIAN_FRONTEND=noninteractive
+
+  apt_get_update_retry() {
+    local attempts=3
+    local delay=2
+    local count=1
+
+    while [ "$count" -le "$attempts" ]; do
+      if apt-get update -qq; then
+        return 0
+      fi
+      log_warn "apt-get update 失败（第 ${count}/${attempts} 次），稍后重试。"
+      sleep "$delay"
+      delay=$((delay + 2))
+      count=$((count + 1))
+    done
+    return 1
+  }
+
+  apt_get_install_retry() {
+    local attempts=3
+    local delay=2
+    local count=1
+
+    while [ "$count" -le "$attempts" ]; do
+      if apt-get install -y -qq "$@"; then
+        return 0
+      fi
+      log_warn "apt-get install 失败（第 ${count}/${attempts} 次），稍后重试。"
+      sleep "$delay"
+      delay=$((delay + 2))
+      count=$((count + 1))
+    done
+    return 1
+  }
+
+  ols_repo_available() {
+    local candidate
+    candidate="$(apt-cache policy openlitespeed 2>/dev/null | awk -F': ' '/Candidate:/{print $2}' | head -n1)"
+    [ -n "$candidate" ] && [ "$candidate" != "(none)" ]
+  }
+
+  ensure_ols_repo() {
+    if ols_repo_available; then
+      log_info "OpenLiteSpeed repo 已可用，跳过添加。"
+      return 0
+    fi
+
+    if compgen -G "/etc/apt/sources.list.d/litespeed*.list" >/dev/null; then
+      log_info "检测到 OpenLiteSpeed repo 列表已存在，跳过重复添加。"
+      return 0
+    fi
+
+    log_info "添加 OpenLiteSpeed repo / Adding OpenLiteSpeed repo..."
+    wget -O - https://repo.litespeed.sh | bash
+  }
+
+  log_info "安装基础依赖（wget/curl/lsb-release/ca-certificates/gnupg）... / Installing prereqs..."
+  log_info "更新 apt 缓存 / Updating apt cache..."
+  apt_get_update_retry
+  apt_get_install_retry wget curl lsb-release ca-certificates gnupg apt-transport-https
+
+  log_info "检查 OpenLiteSpeed repo..."
+  ensure_ols_repo
+  if ! ols_repo_available; then
+    log_info "更新 apt 缓存 / Updating apt cache..."
+    apt_get_update_retry
+  fi
+
+  log_info "安装主软件包 / Installing main packages..."
+  apt_get_install_retry software-properties-common curl
 
   if ! dpkg -l | grep -q '^ii[[:space:]]\+openlitespeed[[:space:]]'; then
     log_info "安装 LOMP Web（openlitespeed）..."
-    apt install -y openlitespeed
+    apt_get_install_retry openlitespeed
   else
     log_info "检测到 LOMP Web（openlitespeed）已安装，跳过。"
   fi
@@ -5903,7 +5972,7 @@ install_packages() {
   # [ANCHOR:INSTALL_PHP]
   if ! dpkg -l | grep -q '^ii[[:space:]]\+lsphp83[[:space:]]'; then
     log_info "安装 lsphp83 及常用扩展（common/mysql/opcache）..."
-    apt install -y lsphp83 lsphp83-common lsphp83-mysql lsphp83-opcache
+    apt_get_install_retry lsphp83 lsphp83-common lsphp83-mysql lsphp83-opcache
   else
     log_info "检测到 lsphp83 已安装，跳过。"
   fi
