@@ -12,6 +12,10 @@ forbidden_terms_b64=(
 forbidden_terms=()
 SCHEMA_PATH="./docs/schema/baseline_diagnostics.schema.json"
 timeout_available=0
+SMOKE_STEP_TIMEOUT="${HZ_SMOKE_STEP_TIMEOUT:-30s}"
+SMOKE_QUICK_TRIAGE_TIMEOUT="${HZ_SMOKE_QUICK_TRIAGE_TIMEOUT:-60s}"
+SMOKE_BASELINE_TIMEOUT="${HZ_SMOKE_BASELINE_TIMEOUT:-60s}"
+smoke_timeout_notice=0
 for term_b64 in "${forbidden_terms_b64[@]}"; do
   if decoded_term=$(printf '%s' "$term_b64" | base64 -d 2>/dev/null); then
     forbidden_terms+=("$decoded_term")
@@ -32,16 +36,35 @@ smoke_report_json_path="$smoke_report_dir/smoke-report.json"
 : > "$smoke_report_path"
 : > "$smoke_report_json_path"
 
+echo "[smoke] checks: bash syntax, baseline diagnostics (dns/origin/proxy/tls/wp/lsws/cache/sys), triage reports, quick triage runner, baseline regression"
+echo "[smoke] timeouts: step=${SMOKE_STEP_TIMEOUT}, quick-triage=${SMOKE_QUICK_TRIAGE_TIMEOUT}, baseline-regression=${SMOKE_BASELINE_TIMEOUT}"
+
 run_with_timeout() {
-  local duration="30s"
+  local duration="$SMOKE_STEP_TIMEOUT"
   if [ $# -gt 0 ] && [[ "$1" =~ ^[0-9]+[smhd]?$ ]]; then
     duration="$1"
     shift
   fi
 
+  if [ $# -eq 0 ]; then
+    return 0
+  fi
+
   if [ "$timeout_available" -eq 1 ]; then
-    timeout "$duration" "$@"
+    if declare -F "${1:-}" >/dev/null 2>&1; then
+      if [ "$smoke_timeout_notice" -eq 0 ]; then
+        echo "[smoke] timeout not applied to shell functions; running inline"
+        smoke_timeout_notice=1
+      fi
+      "$@"
+    else
+      timeout "$duration" "$@"
+    fi
   else
+    if [ "$smoke_timeout_notice" -eq 0 ]; then
+      echo "[smoke] timeout command not available; running without enforced limits"
+      smoke_timeout_notice=1
+    fi
     "$@"
   fi
 }
@@ -885,7 +908,7 @@ fi
 echo "[smoke] quick triage standalone runner"
 if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
   set +e
-  triage_output="$(run_with_timeout 90s env HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --smoke)"
+  triage_output="$(run_with_timeout "$SMOKE_QUICK_TRIAGE_TIMEOUT" env HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --smoke)"
   triage_exit_code=$?
   set -e
   : "$triage_exit_code"
@@ -902,7 +925,7 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
   grep -q "Baseline Diagnostics Summary" "$standalone_report"
 
   set +e
-  triage_output_json="$(run_with_timeout 90s env HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --format json --smoke)"
+  triage_output_json="$(run_with_timeout "$SMOKE_QUICK_TRIAGE_TIMEOUT" env HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" bash ./modules/diagnostics/quick-triage.sh --format json --smoke)"
   triage_json_exit_code=$?
   set -e
   : "$triage_json_exit_code"
@@ -927,7 +950,7 @@ if [ -r "./modules/diagnostics/quick-triage.sh" ]; then
 
   echo "[smoke] quick triage standalone runner (redact mode)"
   set +e
-  triage_output_json_redacted="$(run_with_timeout 90s env HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 bash ./modules/diagnostics/quick-triage.sh --format json --redact --smoke)"
+  triage_output_json_redacted="$(run_with_timeout "$SMOKE_QUICK_TRIAGE_TIMEOUT" env HZ_TRIAGE_TEST_MODE=1 BASELINE_TEST_MODE=1 HZ_TRIAGE_USE_LOCAL=1 HZ_TRIAGE_LOCAL_ROOT="$(pwd)" HZ_TRIAGE_LANG=en HZ_TRIAGE_TEST_DOMAIN="abc.yourdomain.com" HZ_TRIAGE_REDACT=1 HZ_CI_SMOKE=1 HZ_SMOKE_STRICT=0 bash ./modules/diagnostics/quick-triage.sh --format json --redact --smoke)"
   triage_redacted_exit_code=$?
   set -e
   : "$triage_redacted_exit_code"
@@ -981,4 +1004,4 @@ else
 fi
 
 echo "[smoke] baseline regression suite"
-run_with_timeout 90s env HZ_CI_SMOKE=1 bash tests/baseline_smoke.sh
+run_with_timeout "$SMOKE_BASELINE_TIMEOUT" env HZ_CI_SMOKE=1 bash tests/baseline_smoke.sh

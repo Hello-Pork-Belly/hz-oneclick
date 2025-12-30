@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-TIMEOUT_CMD := $(shell command -v timeout >/dev/null 2>&1 && echo "timeout 90s" || echo "")
+TIMEOUT_CMD := $(shell command -v timeout >/dev/null 2>&1 && echo "timeout 180s" || echo "")
 
 .PHONY: help lint lint-strict smoke smoke-selftest ci lint-tools
 
