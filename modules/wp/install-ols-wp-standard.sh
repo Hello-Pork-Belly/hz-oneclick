@@ -941,6 +941,199 @@ opt_task_xmlrpc_block_safe() {
   return 0
 }
 
+opt_task_uploads_php_block_safe() {
+  local lang
+  local wp_path uploads_dir htaccess_path report_path backup_path timestamp
+  local begin_marker end_marker begin_count end_count block_status htaccess_existed
+  local block_content filesmatch_line tmp_path
+  lang="$(get_finish_lang)"
+
+  if [ "$lang" = "en" ]; then
+    log_step "Optimize: Uploads PHP execution block (safe)"
+  else
+    log_step "优化：Uploads 禁止 PHP 执行（安全）"
+  fi
+
+  if ! opt_prepare_context; then
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  uploads_dir="${wp_path}/wp-content/uploads"
+  htaccess_path="${uploads_dir}/.htaccess"
+  report_path="/tmp/hz-wp-uploads-php-block.txt"
+  : >"$report_path"
+
+  if [ -z "$wp_path" ] || [ ! -d "$wp_path" ]; then
+    {
+      echo "wp_path: ${wp_path}"
+      echo "uploads_dir: ${uploads_dir}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: not created"
+      echo "block: not added"
+      echo "status: wp_path missing or invalid"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_warn "Site root missing; skip uploads PHP block."
+    else
+      log_warn "站点目录缺失，跳过 uploads PHP 屏蔽。"
+    fi
+    return 1
+  fi
+
+  if [ ! -d "$uploads_dir" ]; then
+    {
+      echo "wp_path: ${wp_path}"
+      echo "uploads_dir: ${uploads_dir}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: not created"
+      echo "block: not added"
+      echo "status: uploads directory missing"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_warn "Uploads directory missing; skip uploads PHP block."
+    else
+      log_warn "未找到 uploads 目录，跳过 uploads PHP 屏蔽。"
+    fi
+    return 0
+  fi
+
+  begin_marker="# BEGIN HZ UPLOADS PHP BLOCK"
+  end_marker="# END HZ UPLOADS PHP BLOCK"
+  filesmatch_line="<FilesMatch \"\\.ph(p[0-9]?|tml)$\">"
+  block_content="${begin_marker}
+${filesmatch_line}
+  Require all denied
+  Deny from all
+</FilesMatch>
+${end_marker}"
+
+  htaccess_existed="no"
+  backup_path=""
+  if [ -f "$htaccess_path" ]; then
+    htaccess_existed="yes"
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    backup_path="/tmp/hz-uploads-htaccess.bak.${timestamp}"
+    if ! cp -p "$htaccess_path" "$backup_path" >/dev/null 2>&1; then
+      {
+        echo "wp_path: ${wp_path}"
+        echo "uploads_dir: ${uploads_dir}"
+        echo "htaccess_path: ${htaccess_path}"
+        echo "backup: failed"
+        echo "block: not added"
+      } >>"$report_path"
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to create uploads .htaccess backup; abort."
+      else
+        log_warn "创建 uploads .htaccess 备份失败，终止。"
+      fi
+      return 1
+    fi
+  fi
+
+  block_status="added"
+  if grep -Fq "$begin_marker" "$htaccess_path"; then
+    block_status="updated"
+    timestamp="${timestamp:-$(date +%Y%m%d-%H%M%S)}"
+    tmp_path="${htaccess_path}.tmp.${timestamp}"
+    if ! awk -v begin="$begin_marker" -v end="$end_marker" -v block="$block_content" '
+      $0 == begin {print block; in_block=1; next}
+      $0 == end {in_block=0; next}
+      !in_block {print}
+    ' "$htaccess_path" >"$tmp_path"; then
+      if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
+        cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+      fi
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to update uploads .htaccess; restored backup."
+      else
+        log_warn "更新 uploads .htaccess 失败，已从备份恢复。"
+      fi
+      {
+        echo "wp_path: ${wp_path}"
+        echo "uploads_dir: ${uploads_dir}"
+        echo "htaccess_path: ${htaccess_path}"
+        echo "htaccess_existed: ${htaccess_existed}"
+        echo "backup: ${backup_path:-none}"
+        echo "block: update failed"
+      } >>"$report_path"
+      return 1
+    fi
+    if ! mv "$tmp_path" "$htaccess_path" >/dev/null 2>&1; then
+      if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
+        cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+      fi
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to replace uploads .htaccess; restored backup."
+      else
+        log_warn "替换 uploads .htaccess 失败，已从备份恢复。"
+      fi
+      {
+        echo "wp_path: ${wp_path}"
+        echo "uploads_dir: ${uploads_dir}"
+        echo "htaccess_path: ${htaccess_path}"
+        echo "htaccess_existed: ${htaccess_existed}"
+        echo "backup: ${backup_path:-none}"
+        echo "block: update failed"
+      } >>"$report_path"
+      return 1
+    fi
+  else
+    if [ -f "$htaccess_path" ] && [ -s "$htaccess_path" ]; then
+      echo >>"$htaccess_path"
+    fi
+    printf '%s\n' "$block_content" >>"$htaccess_path"
+  fi
+
+  begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+  end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+  if [ "$begin_count" -ne 1 ] || [ "$end_count" -ne 1 ] || \
+    ! grep -Fq "$filesmatch_line" "$htaccess_path" || \
+    ! grep -Fq "Require all denied" "$htaccess_path"; then
+    if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
+      cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+    else
+      rm -f "$htaccess_path" >/dev/null 2>&1 || true
+    fi
+    if [ "$lang" = "en" ]; then
+      log_warn "Uploads PHP block validation failed; restored backup."
+    else
+      log_warn "Uploads PHP 屏蔽校验失败，已从备份恢复。"
+    fi
+    {
+      echo "wp_path: ${wp_path}"
+      echo "uploads_dir: ${uploads_dir}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "htaccess_existed: ${htaccess_existed}"
+      echo "backup: ${backup_path:-none}"
+      echo "block: validation failed; restored"
+    } >>"$report_path"
+    return 1
+  fi
+
+  {
+    echo "wp_path: ${wp_path}"
+    echo "uploads_dir: ${uploads_dir}"
+    echo "htaccess_path: ${htaccess_path}"
+    echo "htaccess_existed: ${htaccess_existed}"
+    if [ -n "$backup_path" ]; then
+      echo "backup: ${backup_path}"
+    else
+      echo "backup: not created"
+    fi
+    echo "block: ${block_status}"
+  } >>"$report_path"
+
+  if [ "$lang" = "en" ]; then
+    log_ok "Uploads PHP execution block applied."
+    log_info "Report saved: ${report_path}"
+  else
+    log_ok "Uploads PHP 执行已阻止。"
+    log_info "报告已保存：${report_path}"
+  fi
+  return 0
+}
+
 opt_task_site_health_snapshot() {
   local lang wp_path status_json_path status_txt_path good_count recommended_count critical_count
   lang="$(get_finish_lang)"
@@ -1588,8 +1781,9 @@ show_optimize_menu() {
       echo " 12) Optimize: wp-config hardening (safe)"
       echo " 13) Optimize: Filesystem permissions (safe)"
       echo " 14) Optimize: XML-RPC block (safe)"
+      echo " 15) Uploads: block PHP execution (safe)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-14]: " choice
+      read -rp "Choose [0-15]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -1606,8 +1800,9 @@ show_optimize_menu() {
       echo " 12) 优化：wp-config 轻量加固（安全）"
       echo " 13) 优化：文件权限（安全）"
       echo " 14) 优化：屏蔽 XML-RPC（安全）"
+      echo " 15) Uploads：禁止 PHP 执行（安全）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-14]: " choice
+      read -rp "请输入选项 [0-15]: " choice
     fi
 
     case "$choice" in
@@ -1709,6 +1904,14 @@ show_optimize_menu() {
         ;;
       14)
         if opt_task_xmlrpc_block_safe; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      15)
+        if opt_task_uploads_php_block_safe; then
           optimize_finish_menu
           return 0
         fi
