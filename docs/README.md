@@ -30,6 +30,11 @@ files and common paths with placeholders.
 See [Troubleshooting](troubleshooting.md) for common startup failure checks and
 fixes.
 
+## Optimize security hardening
+
+See [Optimize security hardening (safe)](optimize-security.md) for the
+WordPress hardening tasks, reports, and smoke timeout knobs.
+
 ## Upgrade
 
 See [Upgrades](upgrade.md) for the step-by-step upgrade workflow and rollback
