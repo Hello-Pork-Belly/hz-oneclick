@@ -949,6 +949,218 @@ opt_task_xmlrpc_block_safe() {
   return 0
 }
 
+opt_task_directory_listing_block_safe() {
+  local lang
+  local wp_path htaccess_path report_path backup_path timestamp tmp_path
+  local begin_marker end_marker block_content block_status
+  local begin_count end_count current_block cleaned_block
+  lang="$(get_finish_lang)"
+
+  if [ "$lang" = "en" ]; then
+    log_step "Optimize: Directory listing block (safe)"
+  else
+    log_step "优化：禁止目录浏览（安全）"
+  fi
+
+  if ! opt_prepare_context "no-wpcli"; then
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  htaccess_path="${wp_path}/.htaccess"
+  report_path="/tmp/hz-wp-dirlisting-block.txt"
+  : >"$report_path"
+
+  begin_marker="# HZ-ONECLICK: directory listing block (safe) BEGIN"
+  end_marker="# HZ-ONECLICK: directory listing block (safe) END"
+  block_content="${begin_marker}
+Options -Indexes
+${end_marker}"
+
+  if [ -z "$wp_path" ] || [ ! -d "$wp_path" ]; then
+    {
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: not created"
+      echo "status: restored"
+      echo "begin_marker_count: 0"
+      echo "end_marker_count: 0"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_warn "Site root missing; skip directory listing block."
+    else
+      log_warn "站点目录缺失，跳过目录浏览阻止。"
+    fi
+    return 1
+  fi
+
+  begin_count=0
+  end_count=0
+  if [ -f "$htaccess_path" ]; then
+    begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+    end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+    if [ "$begin_count" -eq 1 ] && [ "$end_count" -eq 1 ]; then
+      current_block="$(awk -v begin="$begin_marker" -v end="$end_marker" '
+        $0 == begin {in_block=1; next}
+        $0 == end {in_block=0; exit}
+        in_block {print}
+      ' "$htaccess_path")"
+      cleaned_block="$(printf '%s\n' "$current_block" | sed '/^[[:space:]]*$/d')"
+      if [ "$cleaned_block" = "Options -Indexes" ]; then
+        {
+          echo "htaccess_path: ${htaccess_path}"
+          echo "backup: not created"
+          echo "status: already-present"
+          echo "begin_marker_count: ${begin_count}"
+          echo "end_marker_count: ${end_count}"
+        } >>"$report_path"
+        if [ "$lang" = "en" ]; then
+          log_info "Directory listing block already present."
+          log_info "Report saved: ${report_path}"
+        else
+          log_info "目录浏览阻止已存在。"
+          log_info "报告已保存：${report_path}"
+        fi
+        return 0
+      fi
+    fi
+  fi
+
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  backup_path="/tmp/hz-wp-htaccess-dirlist-backup.${timestamp}"
+  if [ -f "$htaccess_path" ]; then
+    if ! cp -p "$htaccess_path" "$backup_path" >/dev/null 2>&1; then
+      {
+        echo "htaccess_path: ${htaccess_path}"
+        echo "backup: failed"
+        echo "status: restored"
+        echo "begin_marker_count: ${begin_count}"
+        echo "end_marker_count: ${end_count}"
+      } >>"$report_path"
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to create .htaccess backup; abort."
+      else
+        log_warn "创建 .htaccess 备份失败，终止。"
+      fi
+      return 1
+    fi
+  else
+    if ! : >"$backup_path"; then
+      {
+        echo "htaccess_path: ${htaccess_path}"
+        echo "backup: failed"
+        echo "status: restored"
+        echo "begin_marker_count: ${begin_count}"
+        echo "end_marker_count: ${end_count}"
+      } >>"$report_path"
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to create .htaccess backup; abort."
+      else
+        log_warn "创建 .htaccess 备份失败，终止。"
+      fi
+      return 1
+    fi
+  fi
+
+  block_status="added"
+  if [ -f "$htaccess_path" ] && grep -Fq "$begin_marker" "$htaccess_path"; then
+    block_status="updated"
+    tmp_path="${htaccess_path}.tmp.${timestamp}"
+    if ! awk -v begin="$begin_marker" -v end="$end_marker" -v block="$block_content" '
+      $0 == begin {print block; in_block=1; next}
+      $0 == end {in_block=0; next}
+      !in_block {print}
+    ' "$htaccess_path" >"$tmp_path"; then
+      cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+      begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+      end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+      {
+        echo "htaccess_path: ${htaccess_path}"
+        echo "backup: ${backup_path}"
+        echo "status: restored"
+        echo "begin_marker_count: ${begin_count}"
+        echo "end_marker_count: ${end_count}"
+      } >>"$report_path"
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to update .htaccess; restored backup."
+      else
+        log_warn "更新 .htaccess 失败，已从备份恢复。"
+      fi
+      return 1
+    fi
+    if ! mv "$tmp_path" "$htaccess_path" >/dev/null 2>&1; then
+      cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+      begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+      end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+      {
+        echo "htaccess_path: ${htaccess_path}"
+        echo "backup: ${backup_path}"
+        echo "status: restored"
+        echo "begin_marker_count: ${begin_count}"
+        echo "end_marker_count: ${end_count}"
+      } >>"$report_path"
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to replace .htaccess; restored backup."
+      else
+        log_warn "替换 .htaccess 失败，已从备份恢复。"
+      fi
+      return 1
+    fi
+  else
+    if [ -f "$htaccess_path" ] && [ -s "$htaccess_path" ]; then
+      echo >>"$htaccess_path"
+      printf '%s\n' "$block_content" >>"$htaccess_path"
+    else
+      printf '%s\n' "$block_content" >"$htaccess_path"
+    fi
+  fi
+
+  begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+  end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+  if [ "$begin_count" -ne 1 ] || [ "$end_count" -ne 1 ] || \
+    ! grep -Fq "Options -Indexes" "$htaccess_path"; then
+    if cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1; then
+      if [ "$lang" = "en" ]; then
+        log_warn "Directory listing block validation failed; restored backup."
+      else
+        log_warn "目录浏览阻止校验失败，已从备份恢复。"
+      fi
+    else
+      if [ "$lang" = "en" ]; then
+        log_warn "Directory listing block validation failed; restore also failed."
+      else
+        log_warn "目录浏览阻止校验失败，恢复也失败。"
+      fi
+    fi
+    begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+    end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+    {
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: ${backup_path}"
+      echo "status: restored"
+      echo "begin_marker_count: ${begin_count}"
+      echo "end_marker_count: ${end_count}"
+    } >>"$report_path"
+    return 1
+  fi
+
+  {
+    echo "htaccess_path: ${htaccess_path}"
+    echo "backup: ${backup_path}"
+    echo "status: ${block_status}"
+    echo "begin_marker_count: ${begin_count}"
+    echo "end_marker_count: ${end_count}"
+  } >>"$report_path"
+
+  if [ "$lang" = "en" ]; then
+    log_ok "Directory listing block applied."
+    log_info "Report saved: ${report_path}"
+  else
+    log_ok "目录浏览阻止已应用。"
+    log_info "报告已保存：${report_path}"
+  fi
+  return 0
+}
+
 opt_task_uploads_php_block_safe() {
   local lang
   local wp_path uploads_dir htaccess_path report_path backup_path timestamp
@@ -1989,9 +2201,10 @@ show_optimize_menu() {
       echo " 13) Optimize: Filesystem permissions (safe)"
       echo " 14) Optimize: Sensitive files web access block (safe)"
       echo " 15) Optimize: XML-RPC block (safe)"
-      echo " 16) Uploads: block PHP execution (safe)"
+      echo " 16) Optimize: Directory listing block (safe)"
+      echo " 17) Uploads: block PHP execution (safe)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-16]: " choice
+      read -rp "Choose [0-17]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -2009,9 +2222,10 @@ show_optimize_menu() {
       echo " 13) 优化：文件权限（安全）"
       echo " 14) 优化：敏感文件 Web 访问阻止（安全）"
       echo " 15) 优化：屏蔽 XML-RPC（安全）"
-      echo " 16) Uploads：禁止 PHP 执行（安全）"
+      echo " 16) 优化：禁止目录浏览（安全）"
+      echo " 17) Uploads：禁止 PHP 执行（安全）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-16]: " choice
+      read -rp "请输入选项 [0-17]: " choice
     fi
 
     case "$choice" in
@@ -2128,6 +2342,14 @@ show_optimize_menu() {
         return 1
         ;;
       16)
+        if opt_task_directory_listing_block_safe; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      17)
         if opt_task_uploads_php_block_safe; then
           optimize_finish_menu
           return 0
