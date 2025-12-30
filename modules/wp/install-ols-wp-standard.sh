@@ -2827,6 +2827,109 @@ get_ram_mb() {
   awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0
 }
 
+get_mem_total_mb() {
+  awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0
+}
+
+get_swap_total_mb() {
+  awk '/SwapTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0
+}
+
+is_swap_active() {
+  local swap_path="$1"
+
+  if [ -r /proc/swaps ]; then
+    awk -v path="$swap_path" '$1==path {found=1} END {exit found?0:1}' /proc/swaps
+    return $?
+  fi
+
+  return 1
+}
+
+ensure_lowend_swap() {
+  # [ANCHOR:ENSURE_LOWEND_SWAP]
+  local ram_mb swap_mb
+  local swap_file="/swapfile"
+  local swap_size_mb=2048
+  local swap_size_bytes=$((swap_size_mb * 1024 * 1024))
+  local current_size=0
+
+  ram_mb="$(get_mem_total_mb)"
+  swap_mb="$(get_swap_total_mb)"
+
+  if ! echo "$ram_mb" | grep -Eq '^[0-9]+$'; then
+    ram_mb=0
+  fi
+  if ! echo "$swap_mb" | grep -Eq '^[0-9]+$'; then
+    swap_mb=0
+  fi
+
+  if [ "$ram_mb" -ge 2048 ] || [ "$swap_mb" -ge 1024 ]; then
+    log_info "Swap 已满足要求，跳过创建。/ Swap is sufficient, skipping."
+    return 0
+  fi
+
+  log_step "低配内存 Swap 保障 / Low-end swap guard"
+
+  if [ -f "$swap_file" ]; then
+    current_size="$(stat -c '%s' "$swap_file" 2>/dev/null || echo 0)"
+  fi
+
+  if [ -f "$swap_file" ] && is_swap_active "$swap_file"; then
+    if [ "$current_size" -ge "$swap_size_bytes" ]; then
+      log_info "检测到已启用 Swap (${swap_file})，容量满足要求。/ Swap already active and sufficient."
+    else
+      log_warn "Swap 文件容量不足（${swap_file}），尝试重新创建 2GB。/ Swap too small, trying to recreate."
+      if ! swapoff "$swap_file" 2>/dev/null; then
+        log_warn "无法停用现有 Swap，跳过重新创建。/ Failed to swapoff, skipping."
+        return 0
+      fi
+      rm -f "$swap_file" 2>/dev/null || true
+    fi
+  fi
+
+  if [ ! -f "$swap_file" ] || [ "$current_size" -lt "$swap_size_bytes" ]; then
+    if command -v fallocate >/dev/null 2>&1; then
+      if ! fallocate -l "${swap_size_mb}M" "$swap_file" 2>/dev/null; then
+        log_warn "创建 Swap 文件失败（fallocate），跳过。/ Swapfile creation failed."
+        return 0
+      fi
+    else
+      if ! dd if=/dev/zero of="$swap_file" bs=1M count="$swap_size_mb" status=none 2>/dev/null; then
+        log_warn "创建 Swap 文件失败（dd），跳过。/ Swapfile creation failed."
+        return 0
+      fi
+    fi
+  fi
+
+  if ! chmod 600 "$swap_file" 2>/dev/null; then
+    log_warn "Swap 文件权限设置失败，跳过。/ Failed to chmod swapfile."
+    return 0
+  fi
+
+  if ! is_swap_active "$swap_file"; then
+    if ! mkswap "$swap_file" >/dev/null 2>&1; then
+      log_warn "mkswap 失败，跳过。/ mkswap failed."
+      return 0
+    fi
+    if ! swapon "$swap_file" 2>/dev/null; then
+      log_warn "swapon 失败，跳过。/ swapon failed."
+      return 0
+    fi
+  fi
+
+  if [ -w /etc/fstab ]; then
+    if ! grep -Eq "^[[:space:]]*${swap_file}[[:space:]]" /etc/fstab; then
+      echo "${swap_file} none swap sw 0 0" >>/etc/fstab
+      log_info "已写入 /etc/fstab（Swap 持久化）。/ Swap persisted."
+    fi
+  else
+    log_warn "无法写入 /etc/fstab，Swap 持久化已跳过。/ Cannot write fstab."
+  fi
+
+  log_info "已启用 2GB Swap (${swap_file})。/ 2GB swap enabled."
+}
+
 detect_system_profile() {
   local arch vcpu mem_kb mem_mb mem_gb disk_total_raw disk_avail_raw os_version
 
@@ -5231,6 +5334,119 @@ update_php_ini_value() {
   return 0
 }
 
+find_lsphp_ini_path() {
+  local ini
+  local candidate
+  local candidates=()
+
+  if [ -n "${LSPHP_VER:-}" ]; then
+    candidates+=("/usr/local/lsws/${LSPHP_VER}/etc/php/"*/litespeed/php.ini)
+    candidates+=("/usr/local/lsws/${LSPHP_VER}/etc/php/"*/cli/php.ini)
+    candidates+=("/usr/local/lsws/${LSPHP_VER}/etc/php.ini")
+  fi
+  candidates+=("/usr/local/lsws/lsphp"*/etc/php/*/litespeed/php.ini)
+
+  for candidate in "${candidates[@]}"; do
+    if [ -f "$candidate" ]; then
+      ini="$candidate"
+      break
+    fi
+  done
+
+  if [ -n "$ini" ]; then
+    printf "%s" "$ini"
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_php_ini_block() {
+  local ini="$1"
+  local begin_marker="; HZ-ONECLICK: php.ini tuning BEGIN"
+  local end_marker="; HZ-ONECLICK: php.ini tuning END"
+
+  if grep -Fq "$begin_marker" "$ini" && grep -Fq "$end_marker" "$ini"; then
+    return 0
+  fi
+
+  {
+    echo
+    echo "$begin_marker"
+    echo "$end_marker"
+  } >>"$ini"
+}
+
+replace_or_mark_php_ini_value() {
+  local ini="$1"
+  local key="$2"
+  local value="$3"
+
+  if grep -Eq "^[[:space:]]*;?[[:space:]]*${key}[[:space:]]*=" "$ini"; then
+    sed -i "s|^[[:space:]]*;?[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$ini"
+    return 0
+  fi
+
+  return 1
+}
+
+apply_lsphp_ini_tuning() {
+  # [ANCHOR:APPLY_LSPHP_INI_TUNING]
+  local ini=""
+  local ini_hash_before ini_hash_after
+  local missing=()
+  local key
+  local value
+  local backup
+
+  if ! ini="$(find_lsphp_ini_path)"; then
+    log_warn "未检测到 LSPHP php.ini，跳过 PHP 参数调优。/ php.ini not found, skipping tuning."
+    return 1
+  fi
+
+  if [ ! -f "$ini" ]; then
+    log_warn "未检测到 LSPHP php.ini，跳过 PHP 参数调优。/ php.ini not found, skipping tuning."
+    return 1
+  fi
+
+  backup="${ini}.bak"
+  if [ ! -f "$backup" ]; then
+    if ! cp -p "$ini" "$backup" 2>/dev/null; then
+      log_warn "php.ini 备份失败，仍尝试继续调整。/ Backup failed, continuing."
+    fi
+  fi
+
+  ini_hash_before="$(sha256sum "$ini" | awk '{print $1}')"
+
+  for key in upload_max_filesize post_max_size memory_limit; do
+    case "$key" in
+      upload_max_filesize) value="64M" ;;
+      post_max_size) value="64M" ;;
+      memory_limit) value="256M" ;;
+    esac
+
+    if ! replace_or_mark_php_ini_value "$ini" "$key" "$value"; then
+      missing+=("${key}=${value}")
+    fi
+  done
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    ensure_php_ini_block "$ini"
+    for key in "${missing[@]}"; do
+      sed -i "/HZ-ONECLICK: php.ini tuning END/i ${key/=/ = }" "$ini"
+    done
+  fi
+
+  ini_hash_after="$(sha256sum "$ini" | awk '{print $1}')"
+  if [ "$ini_hash_before" != "$ini_hash_after" ]; then
+    log_info "已更新 php.ini（${ini}）用于 OLS/LSPHP 调优。/ php.ini tuned."
+  else
+    log_info "php.ini 已符合 OLS/LSPHP 调优要求，无需修改。/ php.ini already tuned."
+  fi
+
+  return 0
+}
+
 ensure_lsphp_extensions() {
   local php_bin="$1"
   local pkg_suffix
@@ -7322,6 +7538,7 @@ install_frontend_only_flow() {
   BASELINE_TIER="$TIER_LITE"
   log_step "LOMP-Lite (Frontend-only): external DB/Redis"
   show_system_profile_once
+  ensure_lowend_swap
   prompt_site_info
 
   while :; do
@@ -7372,6 +7589,7 @@ install_frontend_only_flow() {
   print_lite_preflight_summary
 
   install_packages
+  apply_lsphp_ini_tuning || true
   ensure_wp_cli || { log_error "wp-cli 未就绪，无法继续 LOMP-Lite baseline。"; exit 1; }
   setup_vhost_config
   download_wordpress
@@ -7411,6 +7629,7 @@ install_standard_flow() {
   show_system_profile_once
   prompt_site_info
   prompt_install_mode
+  ensure_lowend_swap
 
   if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
     test_frontend_remote_db_with_retry
@@ -7445,6 +7664,7 @@ install_standard_flow() {
   fi
 
   install_packages
+  apply_lsphp_ini_tuning || true
   ensure_wp_cli || { log_error "wp-cli 未就绪，无法继续 LOMP baseline。"; exit 1; }
   setup_vhost_config
   download_wordpress
