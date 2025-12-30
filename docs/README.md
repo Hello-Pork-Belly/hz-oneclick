@@ -5,6 +5,11 @@ All example paths use placeholders. Replace them with your own site identifier
 (e.g. `your-site`) and domain name (e.g. `abc.yourdomain.com`).
 Replace placeholder domains with your real domain.
 
+## Install modes
+
+See [Install modes (Full stack vs Frontend-only)](install-modes.md) for a
+quick decision guide, required inputs, and connectivity checks.
+
 ## Backup
 
 See [Backups](backup.md) for prerequisites and safety checks before running any

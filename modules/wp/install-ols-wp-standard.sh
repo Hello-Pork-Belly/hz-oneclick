@@ -213,6 +213,16 @@ log_step()  {
   echo -e "\n${CYAN}==== $* ====${NC}\n"
 }
 
+get_install_mode_label() {
+  local mode="${INSTALL_MODE:-full}"
+
+  if [ "$mode" = "frontend" ]; then
+    echo "LNMP-Lite (Frontend-only; Remote DB/Redis)"
+  else
+    echo "LOMP Full Stack (Local DB/Redis)"
+  fi
+}
+
 create_mysql_defaults_file() {
   local user="${1:-}"
   local password="${2:-}"
@@ -4428,23 +4438,28 @@ prompt_install_mode() {
 
   echo
   echo "请选择安装模式："
-  echo "  1) LOMP Full Stack (Local DB)"
-  echo "  2) Frontend Node (Remote DB/Remote Redis)"
+  echo "  1) LOMP Full Stack (Local DB/Redis)"
+  echo "  2) LNMP-Lite (Frontend-only; Remote DB/Redis)"
+  # [ANCHOR:INSTALL_MODE_DOC]
+  echo "  文档参考: docs/install-modes.md / Install modes doc"
   read -rp "请输入选项 [1-2] (默认 1): " choice
   choice="${choice:-1}"
 
   case "$choice" in
     2)
       INSTALL_MODE="frontend"
-      log_info "已选择 Frontend Node（远程 DB/Redis）。"
+      log_info "已选择 LNMP-Lite（Frontend-only; Remote DB/Redis）。"
+      log_info "INSTALL_MODE=frontend（仅安装前端；数据库/Redis 为远程服务）"
       ;;
     1)
       INSTALL_MODE="full"
-      log_info "已选择 Full Stack（本地 DB/Redis）。"
+      log_info "已选择 LOMP Full Stack（Local DB/Redis）。"
+      log_info "INSTALL_MODE=full（本机部署 DB/Redis）"
       ;;
     *)
       INSTALL_MODE="full"
-      log_warn "输入无效，默认 Full Stack（本地 DB/Redis）。"
+      log_warn "输入无效，默认 LOMP Full Stack（Local DB/Redis）。"
+      log_info "INSTALL_MODE=full（本机部署 DB/Redis）"
       ;;
   esac
 }
@@ -4452,7 +4467,7 @@ prompt_install_mode() {
 prompt_remote_db_info_frontend() {
   # [ANCHOR:REMOTE_DB_PROMPT]
   echo
-  echo "================ Frontend Node：远程数据库配置 ================"
+  echo "================ LNMP-Lite（Frontend-only；远程 DB/Redis）数据库配置 ================"
   echo "请先在远程数据库实例中『手动』创建好："
   echo "  - 独立数据库，例如: ${SITE_SLUG}_wp"
   echo "  - 独立数据库用户，例如: ${SITE_SLUG}_user，并分配该库全部权限"
@@ -4513,7 +4528,7 @@ prompt_remote_db_info_frontend() {
 prompt_remote_redis_info_frontend() {
   # [ANCHOR:REMOTE_REDIS_PROMPT]
   echo
-  echo "================ Frontend Node：远程 Redis 配置 ================"
+  echo "================ LNMP-Lite（Frontend-only；远程 DB/Redis）Redis 配置 ================"
 
   while :; do
     read -rp "REMOTE Redis Host（例如 100.64.x.x 或 redis.internal）: " REMOTE_REDIS_HOST
@@ -4547,6 +4562,10 @@ test_frontend_remote_db_with_retry() {
   while :; do
     attempts=$((attempts + 1))
     prompt_remote_db_info_frontend
+    if [ -z "${DB_HOST:-}" ] || [ -z "${DB_USER:-}" ]; then
+      log_warn "REMOTE DB Host/用户名 不能为空，请重新输入。"
+      continue
+    fi
     if test_db_connection; then
       return 0
     fi
@@ -4580,6 +4599,11 @@ test_frontend_remote_redis_with_retry() {
   # [ANCHOR:REMOTE_REDIS_RETRY]
   local attempts=0
   local opt
+
+  if [ "${REDIS_ENABLED:-yes}" != "yes" ]; then
+    log_info "Redis 已禁用，跳过远程 Redis 连接测试。"
+    return 0
+  fi
 
   while :; do
     attempts=$((attempts + 1))
@@ -6803,7 +6827,7 @@ install_packages() {
   fi
 
   if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
-    log_info "Frontend mode: 安装 DB/Redis 客户端工具（mysql/mariadb client + redis-tools）..."
+    log_info "LNMP-Lite (Frontend-only): 安装 DB/Redis 客户端工具（mysql/mariadb client + redis-tools）..."
     # Ubuntu 的默认包名可能是 default-mysql-client；如不可用则 fallback mariadb-client.
     if ! apt_get_install_retry default-mysql-client; then
       log_warn "default-mysql-client 安装失败，尝试 mariadb-client。"
@@ -6811,7 +6835,7 @@ install_packages() {
     fi
     apt_get_install_retry redis-tools
   else
-    log_info "Full mode: 安装本地数据库与 Redis（mariadb-server/redis-server）..."
+    log_info "LOMP Full Stack: 安装本地数据库与 Redis（mariadb-server/redis-server）..."
     apt_get_install_retry mariadb-server redis-server
     systemctl enable --now mariadb >/dev/null 2>&1 || true
     systemctl enable --now redis-server >/dev/null 2>&1 || true
@@ -7899,6 +7923,12 @@ print_summary() {
   echo "====================================="
   echo "站点域名:    ${SITE_DOMAIN}"
   echo "站点 Slug:    ${SITE_SLUG}"
+  echo "安装模式:    $(get_install_mode_label) (INSTALL_MODE=${INSTALL_MODE:-full})"
+  if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
+    echo "说明:        前端节点仅安装客户端工具，DB/Redis 需远程可达。"
+  else
+    echo "说明:        本机安装 DB/Redis。"
+  fi
   echo "站点根目录:  ${DOC_ROOT}"
   echo "数据库主机:  ${DB_HOST}"
   echo "数据库名称:  ${DB_NAME}"
@@ -8026,6 +8056,8 @@ install_standard_flow() {
   ensure_lowend_swap
 
   if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
+    log_warn "Frontend-only 模式需要远程 DB/Redis 可达；本机仅安装 mysql-client/redis-tools，不会部署本地服务。"
+    log_warn "Frontend-only mode requires reachable remote DB/Redis; only mysql-client/redis-tools are installed (no local services)."
     test_frontend_remote_db_with_retry
     test_frontend_remote_redis_with_retry
   else
