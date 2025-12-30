@@ -5283,6 +5283,11 @@ update_wp_config_define() {
       { print }
     ' "$wp_config" >"$tmp" && mv "$tmp" "$wp_config"
   fi
+
+  if [ -f "$wp_config" ]; then
+    chown nobody:nogroup "$wp_config" >/dev/null 2>&1 || true
+    chmod 644 "$wp_config" >/dev/null 2>&1 || true
+  fi
 }
 
 get_site_domain() {
@@ -7147,6 +7152,7 @@ generate_wp_config() {
   apply_wp_salts "$wp_config" "$salt_block"
 
   log_info "已根据输入生成 wp-config.php（DB_* 信息已写入）。"
+  fix_permissions
 }
 
 ensure_wp_https_urls() {
@@ -7234,6 +7240,7 @@ ensure_wp_https_urls() {
     fi
 
     log_info "已在 wp-config.php 中设置 WP_HOME/WP_SITEURL 为 ${https_url}。"
+    fix_permissions
     echo "HTTPS URL 更新: 已自动设置"
     return
   fi
@@ -7666,14 +7673,20 @@ fix_permissions() {
   log_step "修复站点目录权限"
 
   local base="/var/www/${SITE_SLUG}"
+  local doc_root="${DOC_ROOT:-${base}/html}"
   if [ ! -d "$base" ]; then
     log_warn "未找到 ${base}，跳过权限修复。"
     return
   fi
 
+  mkdir -p \
+    "${doc_root}/wp-content/upgrade" \
+    "${doc_root}/wp-content/uploads" \
+    "${doc_root}/wp-content/languages"
+
   chown -R nobody:nogroup "$base"
-  find "$base" -type d -exec chmod 755 {} \;
-  find "$base" -type f -exec chmod 644 {} \;
+  find "$base" -type d -exec chmod 755 {} +
+  find "$base" -type f -exec chmod 644 {} +
 
   log_info "已将 ${base} 目录及文件权限统一为 nobody:nogroup + 755/644。"
 }
