@@ -801,6 +801,146 @@ opt_task_rest_api_check() {
   esac
 }
 
+opt_task_xmlrpc_block_safe() {
+  local lang
+  local wp_path htaccess_path report_path backup_path timestamp
+  local begin_marker end_marker begin_count end_count block_status
+  lang="$(get_finish_lang)"
+
+  if [ "$lang" = "en" ]; then
+    log_step "Optimize: XML-RPC block (safe)"
+  else
+    log_step "优化：屏蔽 XML-RPC（安全）"
+  fi
+
+  if ! opt_prepare_context; then
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  htaccess_path="${wp_path}/.htaccess"
+  report_path="/tmp/hz-wp-xmlrpc-block.txt"
+  : >"$report_path"
+
+  if [ -z "$wp_path" ] || [ ! -d "$wp_path" ]; then
+    {
+      echo "wp_path: ${wp_path}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: not created"
+      echo "block: not added"
+      echo "status: wp_path missing or invalid"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_warn "Site root missing; skip XML-RPC block."
+    else
+      log_warn "站点目录缺失，跳过 XML-RPC 屏蔽。"
+    fi
+    return 1
+  fi
+
+  if [ ! -f "$htaccess_path" ]; then
+    {
+      echo "wp_path: ${wp_path}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "status: missing .htaccess; skip"
+      echo "backup: not created"
+      echo "block: not added"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_warn "Missing .htaccess; skip XML-RPC block."
+    else
+      log_warn "未找到 .htaccess，跳过 XML-RPC 屏蔽。"
+    fi
+    return 0
+  fi
+
+  begin_marker="# BEGIN HZ-ONECLICK XMLRPC BLOCK"
+  end_marker="# END HZ-ONECLICK XMLRPC BLOCK"
+
+  if grep -Fq "$begin_marker" "$htaccess_path"; then
+    {
+      echo "wp_path: ${wp_path}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: not created"
+      echo "block: already present"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_info "XML-RPC block already present."
+      log_info "Report saved: ${report_path}"
+    else
+      log_info "XML-RPC 屏蔽已存在。"
+      log_info "报告已保存：${report_path}"
+    fi
+    return 0
+  fi
+
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  backup_path="${htaccess_path}.bak.${timestamp}"
+  if ! cp -p "$htaccess_path" "$backup_path" >/dev/null 2>&1; then
+    {
+      echo "wp_path: ${wp_path}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: failed"
+      echo "block: not added"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_warn "Failed to create .htaccess backup; abort."
+    else
+      log_warn "创建 .htaccess 备份失败，终止。"
+    fi
+    return 1
+  fi
+
+  {
+    echo
+    echo "${begin_marker}"
+    echo "<Files xmlrpc.php>"
+    echo "  Require all denied"
+    echo "</Files>"
+    echo "${end_marker}"
+  } >>"$htaccess_path"
+
+  begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+  end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+  if [ "$begin_count" -ne 1 ] || [ "$end_count" -ne 1 ]; then
+    if cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1; then
+      if [ "$lang" = "en" ]; then
+        log_error "XML-RPC block validation failed; restored from backup."
+      else
+        log_error "XML-RPC 屏蔽校验失败，已从备份恢复。"
+      fi
+    else
+      if [ "$lang" = "en" ]; then
+        log_error "XML-RPC block validation failed; restore also failed."
+      else
+        log_error "XML-RPC 屏蔽校验失败，恢复也失败。"
+      fi
+    fi
+    {
+      echo "wp_path: ${wp_path}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "backup: ${backup_path}"
+      echo "block: validation failed; restored"
+    } >>"$report_path"
+    return 1
+  fi
+
+  block_status="added"
+  {
+    echo "wp_path: ${wp_path}"
+    echo "htaccess_path: ${htaccess_path}"
+    echo "backup: ${backup_path}"
+    echo "block: ${block_status}"
+  } >>"$report_path"
+
+  if [ "$lang" = "en" ]; then
+    log_info "XML-RPC block done. Report saved: ${report_path}"
+  else
+    log_info "XML-RPC 屏蔽完成。报告已保存：${report_path}"
+  fi
+  return 0
+}
+
 opt_task_site_health_snapshot() {
   local lang wp_path status_json_path status_txt_path good_count recommended_count critical_count
   lang="$(get_finish_lang)"
@@ -1447,8 +1587,9 @@ show_optimize_menu() {
       echo " 11) Optimize: Hardening check"
       echo " 12) Optimize: wp-config hardening (safe)"
       echo " 13) Optimize: Filesystem permissions (safe)"
+      echo " 14) Optimize: XML-RPC block (safe)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-13]: " choice
+      read -rp "Choose [0-14]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -1464,8 +1605,9 @@ show_optimize_menu() {
       echo " 11) Optimize：加固检查"
       echo " 12) 优化：wp-config 轻量加固（安全）"
       echo " 13) 优化：文件权限（安全）"
+      echo " 14) 优化：屏蔽 XML-RPC（安全）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-13]: " choice
+      read -rp "请输入选项 [0-14]: " choice
     fi
 
     case "$choice" in
@@ -1559,6 +1701,14 @@ show_optimize_menu() {
         ;;
       13)
         if opt_task_permissions_hardening_safe; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      14)
+        if opt_task_xmlrpc_block_safe; then
           optimize_finish_menu
           return 0
         fi
