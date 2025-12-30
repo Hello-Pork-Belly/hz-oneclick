@@ -402,7 +402,13 @@ optimize_finish_menu() {
 opt_prepare_context() {
   local lang
   local wp_path
+  local require_wp_cli
   lang="$(get_finish_lang)"
+  require_wp_cli="yes"
+
+  if [ "${1:-}" = "no-wpcli" ]; then
+    require_wp_cli="no"
+  fi
 
   resolve_optimize_site_context
   wp_path="${DOC_ROOT:-}"
@@ -416,25 +422,27 @@ opt_prepare_context() {
     return 1
   fi
 
-  if ! ensure_wp_cli; then
-    if [ "$lang" = "en" ]; then
-      log_warn "wp-cli not ready; skip optimize."
-    else
-      log_warn "wp-cli 未就绪，跳过 Optimize。"
+  if [ "$require_wp_cli" = "yes" ]; then
+    if ! ensure_wp_cli; then
+      if [ "$lang" = "en" ]; then
+        log_warn "wp-cli not ready; skip optimize."
+      else
+        log_warn "wp-cli 未就绪，跳过 Optimize。"
+      fi
+      return 1
     fi
-    return 1
-  fi
 
-  if ! wp --path="$wp_path" --allow-root core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
-    if [ "$lang" = "en" ]; then
-      log_warn "WordPress not installed yet; please finish /wp-admin/install.php first, then re-run Optimize."
-      echo "Re-run command:"
-    else
-      log_warn "WordPress 尚未安装；请先完成 /wp-admin/install.php，然后重新运行 Optimize。"
-      echo "重新运行命令："
+    if ! wp --path="$wp_path" --allow-root core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+      if [ "$lang" = "en" ]; then
+        log_warn "WordPress not installed yet; please finish /wp-admin/install.php first, then re-run Optimize."
+        echo "Re-run command:"
+      else
+        log_warn "WordPress 尚未安装；请先完成 /wp-admin/install.php，然后重新运行 Optimize。"
+        echo "重新运行命令："
+      fi
+      print_optimize_rerun_command
+      return 1
     fi
-    print_optimize_rerun_command
-    return 1
   fi
 
   if [ "$lang" = "en" ]; then
@@ -1749,6 +1757,205 @@ PY
   return 0
 }
 
+opt_task_sensitive_files_block_safe() {
+  local lang
+  local wp_path htaccess_path report_path backup_path timestamp tmp_path
+  local begin_marker end_marker block_content filesmatch_line
+  local begin_count end_count block_status htaccess_existed htaccess_created
+  lang="$(get_finish_lang)"
+
+  if [ "$lang" = "en" ]; then
+    log_step "Optimize: Sensitive files web access block (safe)"
+  else
+    log_step "优化：敏感文件 Web 访问阻止（安全）"
+  fi
+
+  if ! opt_prepare_context "no-wpcli"; then
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-}"
+  htaccess_path="${wp_path}/.htaccess"
+  report_path="/tmp/hz-wp-sensitive-files-block.txt"
+  : >"$report_path"
+
+  if [ -z "$wp_path" ] || [ ! -d "$wp_path" ]; then
+    {
+      echo "wp_path: ${wp_path}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "htaccess_created: no"
+      echo "backup: not created"
+      echo "block: not added"
+      echo "status: wp_path missing or invalid"
+    } >>"$report_path"
+    if [ "$lang" = "en" ]; then
+      log_warn "Site root missing; skip sensitive files block."
+    else
+      log_warn "站点目录缺失，跳过敏感文件阻止。"
+    fi
+    return 1
+  fi
+
+  begin_marker="# BEGIN HZ SENSITIVE FILES BLOCK"
+  end_marker="# END HZ SENSITIVE FILES BLOCK"
+  filesmatch_line="<FilesMatch \"^(wp-config\\.php|wp-config-sample\\.php|\\.env|\\.user\\.ini|php\\.ini|composer\\.json|composer\\.lock|package\\.json|package-lock\\.json|yarn\\.lock)$\">"
+  block_content="${begin_marker}
+${filesmatch_line}
+  Require all denied
+  Deny from all
+</FilesMatch>
+${end_marker}"
+
+  htaccess_existed="no"
+  htaccess_created="no"
+  backup_path=""
+  if [ -f "$htaccess_path" ]; then
+    htaccess_existed="yes"
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    backup_path="/tmp/hz-htaccess-backup-${timestamp}.bak"
+    if ! cp -p "$htaccess_path" "$backup_path" >/dev/null 2>&1; then
+      {
+        echo "wp_path: ${wp_path}"
+        echo "htaccess_path: ${htaccess_path}"
+        echo "htaccess_created: ${htaccess_created}"
+        echo "backup: failed"
+        echo "block: not added"
+      } >>"$report_path"
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to create .htaccess backup; abort."
+      else
+        log_warn "创建 .htaccess 备份失败，终止。"
+      fi
+      return 1
+    fi
+  else
+    htaccess_created="yes"
+    if ! touch "$htaccess_path" >/dev/null 2>&1; then
+      {
+        echo "wp_path: ${wp_path}"
+        echo "htaccess_path: ${htaccess_path}"
+        echo "htaccess_created: failed"
+        echo "backup: not created"
+        echo "block: not added"
+      } >>"$report_path"
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to create .htaccess; abort."
+      else
+        log_warn "创建 .htaccess 失败，终止。"
+      fi
+      return 1
+    fi
+  fi
+
+  block_status="added"
+  begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+  end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+  if [ "$begin_count" -eq 1 ] && [ "$end_count" -eq 1 ] && \
+    grep -Fq "$filesmatch_line" "$htaccess_path" && \
+    grep -Fq "Require all denied" "$htaccess_path"; then
+    block_status="already-present"
+  elif grep -Fq "$begin_marker" "$htaccess_path"; then
+    block_status="updated"
+    timestamp="${timestamp:-$(date +%Y%m%d-%H%M%S)}"
+    tmp_path="${htaccess_path}.tmp.${timestamp}"
+    if ! awk -v begin="$begin_marker" -v end="$end_marker" -v block="$block_content" '
+      $0 == begin {print block; in_block=1; next}
+      $0 == end {in_block=0; next}
+      !in_block {print}
+    ' "$htaccess_path" >"$tmp_path"; then
+      if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
+        cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+      fi
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to update .htaccess; restored backup."
+      else
+        log_warn "更新 .htaccess 失败，已从备份恢复。"
+      fi
+      {
+        echo "wp_path: ${wp_path}"
+        echo "htaccess_path: ${htaccess_path}"
+        echo "htaccess_existed: ${htaccess_existed}"
+        echo "htaccess_created: ${htaccess_created}"
+        echo "backup: ${backup_path:-none}"
+        echo "block: update failed"
+      } >>"$report_path"
+      return 1
+    fi
+    if ! mv "$tmp_path" "$htaccess_path" >/dev/null 2>&1; then
+      if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
+        cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+      fi
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to replace .htaccess; restored backup."
+      else
+        log_warn "替换 .htaccess 失败，已从备份恢复。"
+      fi
+      {
+        echo "wp_path: ${wp_path}"
+        echo "htaccess_path: ${htaccess_path}"
+        echo "htaccess_existed: ${htaccess_existed}"
+        echo "htaccess_created: ${htaccess_created}"
+        echo "backup: ${backup_path:-none}"
+        echo "block: update failed"
+      } >>"$report_path"
+      return 1
+    fi
+  else
+    if [ -s "$htaccess_path" ]; then
+      echo >>"$htaccess_path"
+    fi
+    printf '%s\n' "$block_content" >>"$htaccess_path"
+  fi
+
+  begin_count="$(grep -cF "$begin_marker" "$htaccess_path" || true)"
+  end_count="$(grep -cF "$end_marker" "$htaccess_path" || true)"
+  if [ "$begin_count" -ne 1 ] || [ "$end_count" -ne 1 ] || \
+    ! grep -Fq "$filesmatch_line" "$htaccess_path" || \
+    ! grep -Fq "Require all denied" "$htaccess_path"; then
+    if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
+      cp -p "$backup_path" "$htaccess_path" >/dev/null 2>&1 || true
+    else
+      rm -f "$htaccess_path" >/dev/null 2>&1 || true
+    fi
+    if [ "$lang" = "en" ]; then
+      log_warn "Sensitive files block validation failed; restored backup."
+    else
+      log_warn "敏感文件阻止校验失败，已从备份恢复。"
+    fi
+    {
+      echo "wp_path: ${wp_path}"
+      echo "htaccess_path: ${htaccess_path}"
+      echo "htaccess_existed: ${htaccess_existed}"
+      echo "htaccess_created: ${htaccess_created}"
+      echo "backup: ${backup_path:-none}"
+      echo "block: validation failed; restored"
+    } >>"$report_path"
+    return 1
+  fi
+
+  {
+    echo "wp_path: ${wp_path}"
+    echo "htaccess_path: ${htaccess_path}"
+    echo "htaccess_existed: ${htaccess_existed}"
+    echo "htaccess_created: ${htaccess_created}"
+    if [ -n "$backup_path" ]; then
+      echo "backup: ${backup_path}"
+    else
+      echo "backup: not created"
+    fi
+    echo "block: ${block_status}"
+  } >>"$report_path"
+
+  if [ "$lang" = "en" ]; then
+    log_ok "Sensitive files block applied."
+    log_info "Report saved: ${report_path}"
+  else
+    log_ok "敏感文件已阻止访问。"
+    log_info "报告已保存：${report_path}"
+  fi
+  return 0
+}
+
 show_optimize_menu() {
   local lang choice
   lang="$(get_finish_lang)"
@@ -1780,10 +1987,11 @@ show_optimize_menu() {
       echo " 11) Optimize: Hardening check"
       echo " 12) Optimize: wp-config hardening (safe)"
       echo " 13) Optimize: Filesystem permissions (safe)"
-      echo " 14) Optimize: XML-RPC block (safe)"
-      echo " 15) Uploads: block PHP execution (safe)"
+      echo " 14) Optimize: Sensitive files web access block (safe)"
+      echo " 15) Optimize: XML-RPC block (safe)"
+      echo " 16) Uploads: block PHP execution (safe)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-15]: " choice
+      read -rp "Choose [0-16]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -1799,10 +2007,11 @@ show_optimize_menu() {
       echo " 11) Optimize：加固检查"
       echo " 12) 优化：wp-config 轻量加固（安全）"
       echo " 13) 优化：文件权限（安全）"
-      echo " 14) 优化：屏蔽 XML-RPC（安全）"
-      echo " 15) Uploads：禁止 PHP 执行（安全）"
+      echo " 14) 优化：敏感文件 Web 访问阻止（安全）"
+      echo " 15) 优化：屏蔽 XML-RPC（安全）"
+      echo " 16) Uploads：禁止 PHP 执行（安全）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-15]: " choice
+      read -rp "请输入选项 [0-16]: " choice
     fi
 
     case "$choice" in
@@ -1903,7 +2112,7 @@ show_optimize_menu() {
         return 1
         ;;
       14)
-        if opt_task_xmlrpc_block_safe; then
+        if opt_task_sensitive_files_block_safe; then
           optimize_finish_menu
           return 0
         fi
@@ -1911,6 +2120,14 @@ show_optimize_menu() {
         return 1
         ;;
       15)
+        if opt_task_xmlrpc_block_safe; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      16)
         if opt_task_uploads_php_block_safe; then
           optimize_finish_menu
           return 0
