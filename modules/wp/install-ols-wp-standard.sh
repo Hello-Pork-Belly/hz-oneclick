@@ -60,6 +60,7 @@ SITE_SIZE_CHECK_SCRIPT=""
 SITE_SIZE_CHECK_SERVICE=""
 SITE_SIZE_CHECK_TIMER=""
 LSPHP_EXTENSIONS_APT_UPDATED=0
+: "${INSTALL_MODE:=full}"
 
 if [ -r "$COMMON_LIB" ]; then
   # shellcheck source=/dev/null
@@ -3784,7 +3785,7 @@ show_main_menu() {
   echo
   echo "安装档位（LOMP / LNMP）："
   echo "  1) LOMP-Lite（Frontend-only，仅部署前端，DB/Redis 外置）"
-  echo "  2) LOMP-Standard（前后端一体，含本地 DB/Redis）"
+  echo "  2) LOMP-Standard（可选 Full Stack 本地 DB/Redis 或 Frontend 节点）"
   echo "  3) LOMP-Hub（集中式 Hub，本机 DB/Redis + 本地站点）"
   echo "  4) LNMP-Lite（占位/仅提示）"
   echo "  5) LNMP-Standard（占位/仅提示）"
@@ -3996,6 +3997,15 @@ remove_wp_by_slug() {
 
 cleanup_db_redis_menu() {
   # [ANCHOR:CLEANUP_DB_REDIS_MENU]
+  if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
+    log_warn "frontend mode: remote DB/Redis; cleanup is disabled here."
+    log_warn "前端节点模式：DB/Redis 在远端，本机不提供清理操作。"
+    if is_menu_context; then
+      show_main_menu
+    fi
+    return
+  fi
+
   echo -e "${YELLOW}[危险]${NC} 本菜单会对数据库 / Redis 执行删除/清空操作，请务必提前备份。"
   echo
   echo "4) 清理数据库 / Redis（应在 DB / Redis 所在机器执行）："
@@ -4307,6 +4317,197 @@ prompt_db_user_host() {
       return 0
       ;;
   esac
+}
+
+prompt_install_mode() {
+  # [ANCHOR:INSTALL_MODE_PROMPT]
+  local choice
+
+  echo
+  echo "请选择安装模式："
+  echo "  1) LOMP Full Stack (Local DB)"
+  echo "  2) Frontend Node (Remote DB/Remote Redis)"
+  read -rp "请输入选项 [1-2] (默认 1): " choice
+  choice="${choice:-1}"
+
+  case "$choice" in
+    2)
+      INSTALL_MODE="frontend"
+      log_info "已选择 Frontend Node（远程 DB/Redis）。"
+      ;;
+    1)
+      INSTALL_MODE="full"
+      log_info "已选择 Full Stack（本地 DB/Redis）。"
+      ;;
+    *)
+      INSTALL_MODE="full"
+      log_warn "输入无效，默认 Full Stack（本地 DB/Redis）。"
+      ;;
+  esac
+}
+
+prompt_remote_db_info_frontend() {
+  # [ANCHOR:REMOTE_DB_PROMPT]
+  echo
+  echo "================ Frontend Node：远程数据库配置 ================"
+  echo "请先在远程数据库实例中『手动』创建好："
+  echo "  - 独立数据库，例如: ${SITE_SLUG}_wp"
+  echo "  - 独立数据库用户，例如: ${SITE_SLUG}_user，并分配该库全部权限"
+  echo
+
+  while :; do
+    read -rp "REMOTE DB Host（Tailscale IP 常见，例如 100.64.x.x）: " REMOTE_DB_HOST
+    [ -n "$REMOTE_DB_HOST" ] && break
+    log_warn "REMOTE DB Host 不能为空。"
+  done
+
+  while :; do
+    read -rp "REMOTE DB Port [3306]: " REMOTE_DB_PORT
+    REMOTE_DB_PORT="${REMOTE_DB_PORT:-3306}"
+    if [[ "$REMOTE_DB_PORT" =~ ^[0-9]+$ ]]; then
+      break
+    fi
+    log_warn "REMOTE DB Port 必须为数字。"
+  done
+
+  while :; do
+    read -rp "DB 名称（必须与已创建数据库名称完全一致，例如: ${SITE_SLUG}_wp）: " DB_NAME
+    [ -n "$DB_NAME" ] && break
+    log_warn "DB 名称不能为空。"
+  done
+
+  while :; do
+    read -rp "REMOTE DB 用户名（例如: ${SITE_SLUG}_user）: " REMOTE_DB_USER
+    [ -n "$REMOTE_DB_USER" ] && break
+    log_warn "REMOTE DB 用户名不能为空。"
+  done
+
+  while :; do
+    read -rsp "REMOTE DB 密码（不会回显）: " REMOTE_DB_PASSWORD
+    echo
+    if [ -z "$REMOTE_DB_PASSWORD" ]; then
+      log_warn "REMOTE DB 密码不能为空。"
+      continue
+    fi
+
+    read -rsp "请再次输入 REMOTE DB 密码进行确认: " REMOTE_DB_PASSWORD_CONFIRM
+    echo
+    if [ "$REMOTE_DB_PASSWORD" != "$REMOTE_DB_PASSWORD_CONFIRM" ]; then
+      log_error "两次输入的 REMOTE DB 密码不一致，请重新输入。"
+      continue
+    fi
+
+    unset REMOTE_DB_PASSWORD_CONFIRM
+    break
+  done
+
+  DB_HOST="$REMOTE_DB_HOST"
+  DB_PORT="$REMOTE_DB_PORT"
+  DB_USER="$REMOTE_DB_USER"
+  DB_PASSWORD="$REMOTE_DB_PASSWORD"
+}
+
+prompt_remote_redis_info_frontend() {
+  # [ANCHOR:REMOTE_REDIS_PROMPT]
+  echo
+  echo "================ Frontend Node：远程 Redis 配置 ================"
+
+  while :; do
+    read -rp "REMOTE Redis Host（例如 100.64.x.x 或 redis.internal）: " REMOTE_REDIS_HOST
+    [ -n "$REMOTE_REDIS_HOST" ] && break
+    log_warn "REMOTE Redis Host 不能为空。"
+  done
+
+  while :; do
+    read -rp "REMOTE Redis Port [6379]: " REMOTE_REDIS_PORT
+    REMOTE_REDIS_PORT="${REMOTE_REDIS_PORT:-6379}"
+    if [[ "$REMOTE_REDIS_PORT" =~ ^[0-9]+$ ]]; then
+      break
+    fi
+    log_warn "REMOTE Redis Port 必须为数字。"
+  done
+
+  read -rsp "REMOTE Redis 密码（可留空）: " REMOTE_REDIS_PASSWORD
+  echo
+
+  REDIS_ENABLED="yes"
+  REDIS_HOST="$REMOTE_REDIS_HOST"
+  REDIS_PORT="$REMOTE_REDIS_PORT"
+  REDIS_PASSWORD="$REMOTE_REDIS_PASSWORD"
+}
+
+test_frontend_remote_db_with_retry() {
+  # [ANCHOR:REMOTE_DB_RETRY]
+  local attempts=0
+  local opt
+
+  while :; do
+    attempts=$((attempts + 1))
+    prompt_remote_db_info_frontend
+    if test_db_connection; then
+      return 0
+    fi
+
+    log_error "数据库连接失败 / Database connection failed."
+    if [ "$attempts" -ge 3 ]; then
+      log_error "已达到最大重试次数，退出。/ Maximum retries reached, exiting."
+      exit 1
+    fi
+
+    echo "-------------------------------------"
+    echo "  1) 重新输入远程 DB 信息 / Retry"
+    echo "  0) 退出脚本 / Exit"
+    echo "-------------------------------------"
+    read -rp "请输入选项 [0-1]: " opt
+    case "$opt" in
+      1)
+        ;;
+      0)
+        log_info "已退出脚本。"
+        exit 1
+        ;;
+      *)
+        log_warn "输入无效，将重新输入远程 DB 信息。"
+        ;;
+    esac
+  done
+}
+
+test_frontend_remote_redis_with_retry() {
+  # [ANCHOR:REMOTE_REDIS_RETRY]
+  local attempts=0
+  local opt
+
+  while :; do
+    attempts=$((attempts + 1))
+    prompt_remote_redis_info_frontend
+    if test_redis_connection_lite; then
+      return 0
+    fi
+
+    log_error "Redis 连接失败 / Redis connection failed."
+    if [ "$attempts" -ge 3 ]; then
+      log_error "已达到最大重试次数，退出。/ Maximum retries reached, exiting."
+      exit 1
+    fi
+
+    echo "-------------------------------------"
+    echo "  1) 重新输入 Redis 信息 / Retry"
+    echo "  0) 退出脚本 / Exit"
+    echo "-------------------------------------"
+    read -rp "请输入选项 [0-1]: " opt
+    case "$opt" in
+      1)
+        ;;
+      0)
+        log_info "已退出脚本。"
+        exit 1
+        ;;
+      *)
+        log_warn "输入无效，将重新输入 Redis 信息。"
+        ;;
+    esac
+  done
 }
 
 prompt_db_info() {
@@ -6078,6 +6279,21 @@ install_packages() {
     log_info "检测到 ${LSPHP_VER} 已安装，跳过。"
   fi
 
+  if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
+    log_info "Frontend mode: 安装 DB/Redis 客户端工具（mysql/mariadb client + redis-tools）..."
+    # Ubuntu 的默认包名可能是 default-mysql-client；如不可用则 fallback mariadb-client.
+    if ! apt_get_install_retry default-mysql-client; then
+      log_warn "default-mysql-client 安装失败，尝试 mariadb-client。"
+      apt_get_install_retry mariadb-client
+    fi
+    apt_get_install_retry redis-tools
+  else
+    log_info "Full mode: 安装本地数据库与 Redis（mariadb-server/redis-server）..."
+    apt_get_install_retry mariadb-server redis-server
+    systemctl enable --now mariadb >/dev/null 2>&1 || true
+    systemctl enable --now redis-server >/dev/null 2>&1 || true
+  fi
+
   systemctl enable lsws >/dev/null 2>&1 || true
   systemctl restart lsws
 }
@@ -7101,6 +7317,7 @@ install_frontend_only_flow() {
 
   require_root
   check_os
+  INSTALL_MODE="frontend"
   LITE_PREFLIGHT_MODE=1
   BASELINE_TIER="$TIER_LITE"
   log_step "LOMP-Lite (Frontend-only): external DB/Redis"
@@ -7193,33 +7410,39 @@ install_standard_flow() {
   log_step "LOMP-Standard: local DB/Redis"
   show_system_profile_once
   prompt_site_info
+  prompt_install_mode
 
-  # 循环输入 DB 信息并测试连通性，直到成功或用户选择退出
-  while :; do
-    prompt_db_info
+  if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
+    test_frontend_remote_db_with_retry
+    test_frontend_remote_redis_with_retry
+  else
+    # 循环输入 DB 信息并测试连通性，直到成功或用户选择退出
+    while :; do
+      prompt_db_info
 
-    if test_db_connection; then
-      break
-    fi
+      if test_db_connection; then
+        break
+      fi
 
-    echo "-------------------------------------"
-    echo "  1) 重新输入数据库信息"
-    echo "  0) 退出脚本"
-    echo "-------------------------------------"
-    read -rp "请输入选项 [0-1]: " opt
-    case "$opt" in
-      1)
-        # 回到 while 顶部，重新输入
-        ;;
-      0)
-        log_info "已退出脚本。"
-        exit 1
-        ;;
-      *)
-        log_warn "输入无效，将默认重新输入数据库信息。"
-        ;;
-    esac
-  done
+      echo "-------------------------------------"
+      echo "  1) 重新输入数据库信息"
+      echo "  0) 退出脚本"
+      echo "-------------------------------------"
+      read -rp "请输入选项 [0-1]: " opt
+      case "$opt" in
+        1)
+          # 回到 while 顶部，重新输入
+          ;;
+        0)
+          log_info "已退出脚本。"
+          exit 1
+          ;;
+        *)
+          log_warn "输入无效，将默认重新输入数据库信息。"
+          ;;
+      esac
+    done
+  fi
 
   install_packages
   ensure_wp_cli || { log_error "wp-cli 未就绪，无法继续 LOMP baseline。"; exit 1; }
@@ -7228,6 +7451,9 @@ install_standard_flow() {
   prompt_site_size_limit
   setup_site_size_limit_monitor
   generate_wp_config
+  if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
+    ensure_wp_redis_config
+  fi
   apply_wp_site_health_baseline
   fix_permissions
   env_self_check
