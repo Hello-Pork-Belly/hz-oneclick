@@ -5266,6 +5266,165 @@ get_site_domain() {
   printf "%s" "$domain"
 }
 
+hosts_domain_present() {
+  local domain="$1"
+
+  [ -f /etc/hosts ] || return 1
+  awk -v domain="$domain" '
+    {
+      line=$0
+      sub(/#.*/, "", line)
+      if (line ~ /^[[:space:]]*$/) next
+      n=split(line, fields, /[[:space:]]+/)
+      for (i=2; i<=n; i++) {
+        if (fields[i] == domain) {
+          found=1
+          exit
+        }
+      }
+    }
+    END {exit found ? 0 : 1}
+  ' /etc/hosts
+}
+
+hosts_block_domain_once() {
+  local domain="$1"
+  local begin_marker="$2"
+  local end_marker="$3"
+
+  awk -v domain="$domain" -v begin="$begin_marker" -v end="$end_marker" '
+    BEGIN {in_block=0; count=0; block=0}
+    $0 == begin {in_block=1; block=1; next}
+    $0 == end {in_block=0; next}
+    in_block {
+      line=$0
+      sub(/#.*/, "", line)
+      if (line ~ /^[[:space:]]*$/) next
+      n=split(line, fields, /[[:space:]]+/)
+      for (i=2; i<=n; i++) {
+        if (fields[i] == domain) {
+          count++
+        }
+      }
+    }
+    END {exit (block && count == 1) ? 0 : 1}
+  ' /etc/hosts
+}
+
+ensure_https_loopback_hosts_entry() {
+  local lang domain begin_marker end_marker backup_path tmp_file
+
+  lang="$(get_finish_lang)"
+  domain="$(get_site_domain)"
+  begin_marker="# HZ-ONECLICK: https loopback (safe) BEGIN"
+  end_marker="# HZ-ONECLICK: https loopback (safe) END"
+
+  if [ -z "$domain" ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "No domain detected; skipping HTTPS loopback hosts entry."
+    else
+      log_warn "未检测到域名，跳过 HTTPS loopback hosts 写入。"
+    fi
+    return 0
+  fi
+
+  if [[ "$domain" == "localhost" ]] || [[ "$domain" =~ [[:space:]] ]]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Invalid domain (${domain}); skipping HTTPS loopback hosts entry."
+    else
+      log_warn "域名无效（${domain}），跳过 HTTPS loopback hosts 写入。"
+    fi
+    return 0
+  fi
+
+  if [ ! -f /etc/hosts ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "/etc/hosts not found; skipping HTTPS loopback hosts entry."
+    else
+      log_warn "/etc/hosts 不存在，跳过 HTTPS loopback hosts 写入。"
+    fi
+    return 0
+  fi
+
+  if [ ! -w /etc/hosts ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "/etc/hosts not writable; skipping HTTPS loopback hosts entry."
+    else
+      log_warn "/etc/hosts 不可写，跳过 HTTPS loopback hosts 写入。"
+    fi
+    return 0
+  fi
+
+  if hosts_domain_present "$domain"; then
+    if [ "$lang" = "en" ]; then
+      log_info "Domain ${domain} already present in /etc/hosts; skipping."
+    else
+      log_info "检测到 ${domain} 已存在于 /etc/hosts，跳过写入。"
+    fi
+    return 0
+  fi
+
+  backup_path="/tmp/hz-hosts.bak.$(date +%s)"
+  if cp /etc/hosts "$backup_path"; then
+    if [ "$lang" = "en" ]; then
+      log_info "Backup /etc/hosts created at ${backup_path}."
+    else
+      log_info "已备份 /etc/hosts 至 ${backup_path}。"
+    fi
+  else
+    if [ "$lang" = "en" ]; then
+      log_error "Failed to backup /etc/hosts; skipping update."
+    else
+      log_error "备份 /etc/hosts 失败，已跳过修改。"
+    fi
+    return 1
+  fi
+
+  tmp_file="$(mktemp)"
+  awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin {in_block=1; next}
+    $0 == end {in_block=0; next}
+    !in_block {print}
+  ' /etc/hosts >"$tmp_file"
+
+  {
+    echo "$begin_marker"
+    echo "127.0.0.1 ${domain}"
+    echo "$end_marker"
+  } >>"$tmp_file"
+
+  if ! cp "$tmp_file" /etc/hosts; then
+    rm -f "$tmp_file"
+    cp "$backup_path" /etc/hosts || true
+    if [ "$lang" = "en" ]; then
+      log_error "Failed to update /etc/hosts; restored from backup."
+    else
+      log_error "/etc/hosts 更新失败，已从备份恢复。"
+    fi
+    return 1
+  fi
+
+  rm -f "$tmp_file"
+
+  if ! hosts_block_domain_once "$domain" "$begin_marker" "$end_marker"; then
+    cp "$backup_path" /etc/hosts || true
+    if [ "$lang" = "en" ]; then
+      log_error "Hosts validation failed; restored from backup."
+    else
+      log_error "hosts 校验失败，已从备份恢复。"
+    fi
+    return 1
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_info "Added HTTPS loopback hosts entry for ${domain}."
+  else
+    log_info "已添加 HTTPS loopback hosts 映射：${domain}。"
+  fi
+
+  return 0
+}
+
 detect_lsphp_bin() {
   local bins=()
   local bin
@@ -7127,6 +7286,91 @@ ensure_wp_loopback_and_rest_health() {
   fi
 }
 
+run_https_loopback_hosts_mitigation() {
+  local lang domain url curl_exit
+
+  lang="$(get_finish_lang)"
+  domain="$(get_site_domain)"
+
+  if [ -z "$domain" ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "No domain detected; skipping HTTPS loopback probe."
+    else
+      log_warn "未检测到域名，跳过 HTTPS loopback 探测。"
+    fi
+    return 0
+  fi
+
+  if [[ "$domain" == "localhost" ]] || [[ "$domain" =~ [[:space:]] ]]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Invalid domain (${domain}); skipping HTTPS loopback probe."
+    else
+      log_warn "域名无效（${domain}），跳过 HTTPS loopback 探测。"
+    fi
+    return 0
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    if [ "$lang" = "en" ]; then
+      log_warn "curl not found; skipping HTTPS loopback probe."
+    else
+      log_warn "未找到 curl，跳过 HTTPS loopback 探测。"
+    fi
+    return 0
+  fi
+
+  url="https://${domain}"
+  curl_exit=0
+  curl -kfsSIL --max-time 5 --connect-timeout 3 -L "$url" >/dev/null 2>&1 || curl_exit=$?
+  if [ "${curl_exit:-0}" -eq 0 ]; then
+    if [ "$lang" = "en" ]; then
+      log_info "HTTPS loopback OK for ${domain}."
+    else
+      log_info "HTTPS loopback 正常：${domain}。"
+    fi
+    return 0
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_warn "HTTPS loopback failed for ${domain}; checking hosts workaround."
+  else
+    log_warn "HTTPS loopback 失败：${domain}，检查 hosts 缓解方案。"
+  fi
+
+  if hosts_domain_present "$domain"; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Domain already present in /etc/hosts; skipping hosts update."
+    else
+      log_warn "检测到域名已存在于 /etc/hosts，跳过 hosts 更新。"
+    fi
+    return 0
+  fi
+
+  if ensure_https_loopback_hosts_entry; then
+    curl_exit=0
+    curl -kfsSIL --max-time 5 --connect-timeout 3 -L "$url" >/dev/null 2>&1 || curl_exit=$?
+    if [ "${curl_exit:-0}" -eq 0 ]; then
+      if [ "$lang" = "en" ]; then
+        log_info "HTTPS loopback OK after hosts update for ${domain}."
+      else
+        log_info "hosts 更新后 HTTPS loopback 正常：${domain}。"
+      fi
+    else
+      if [ "$lang" = "en" ]; then
+        log_warn "HTTPS loopback still failing after hosts update for ${domain}."
+      else
+        log_warn "hosts 更新后 HTTPS loopback 仍失败：${domain}。"
+      fi
+    fi
+  else
+    if [ "$lang" = "en" ]; then
+      log_warn "HTTPS loopback hosts update was not applied."
+    else
+      log_warn "HTTPS loopback hosts 更新未生效。"
+    fi
+  fi
+}
+
 loopback_hosts_block_present() {
   local begin_marker="$1"
   local end_marker="$2"
@@ -7750,6 +7994,7 @@ install_frontend_only_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  run_https_loopback_hosts_mitigation
   ensure_wp_core_installed || true
   apply_wp_lomp_baseline
   wp_slim_post_install
@@ -7828,6 +8073,7 @@ install_standard_flow() {
   env_self_check
   configure_ssl
   ensure_wp_https_urls
+  run_https_loopback_hosts_mitigation
   ensure_wp_core_installed || true
   apply_wp_lomp_baseline
   wp_slim_post_install
