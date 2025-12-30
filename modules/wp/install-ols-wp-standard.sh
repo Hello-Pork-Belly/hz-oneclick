@@ -821,7 +821,7 @@ opt_task_xmlrpc_block_safe() {
     log_step "优化：屏蔽 XML-RPC（安全）"
   fi
 
-  if ! opt_prepare_context; then
+  if ! opt_prepare_context "no-wpcli"; then
     return 1
   fi
 
@@ -1174,7 +1174,7 @@ opt_task_uploads_php_block_safe() {
     log_step "优化：Uploads 禁止 PHP 执行（安全）"
   fi
 
-  if ! opt_prepare_context; then
+  if ! opt_prepare_context "no-wpcli"; then
     return 1
   fi
 
@@ -1667,6 +1667,144 @@ opt_task_hardening_check() {
     log_ok "Hardening check report saved: /tmp/hz-wp-hardening-check.txt"
   else
     log_ok "加固检查报告已保存：/tmp/hz-wp-hardening-check.txt"
+  fi
+  return 0
+}
+
+opt_task_security_hardening_suite_safe() {
+  local lang suite_report timestamp wp_path
+  local wpcli_ready wpcli_installed wpcli_reason
+  local ran_count skipped_count failed_count
+  lang="$(get_finish_lang)"
+
+  if [ "$lang" = "en" ]; then
+    log_step "Optimize: Security hardening suite (safe)"
+  else
+    log_step "优化：安全加固合集（安全）"
+  fi
+
+  suite_report="/tmp/hz-wp-security-hardening-suite.txt"
+  timestamp="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+  ran_count=0
+  skipped_count=0
+  failed_count=0
+  wpcli_ready="no"
+  wpcli_installed="no"
+  wpcli_reason=""
+
+  if ! opt_prepare_context "no-wpcli"; then
+    wp_path="${OPT_WP_PATH:-${DOC_ROOT:-unknown}}"
+    {
+      echo "=== WordPress Security Hardening Suite (Safe) ==="
+      echo "Timestamp: ${timestamp}"
+      echo "Site path: ${wp_path}"
+      echo "Status: failed to resolve site context"
+      echo "Report path: ${suite_report}"
+    } >"$suite_report"
+    if [ "$lang" = "en" ]; then
+      log_warn "Security hardening suite skipped (missing site context). Report: ${suite_report}"
+    else
+      log_warn "安全加固合集跳过（未检测到站点目录）。报告：${suite_report}"
+    fi
+    return 1
+  fi
+
+  wp_path="${OPT_WP_PATH:-unknown}"
+  if ensure_wp_cli; then
+    wpcli_ready="yes"
+    if wp --path="$wp_path" --allow-root core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+      wpcli_installed="yes"
+    else
+      wpcli_reason="wp not installed"
+    fi
+  else
+    wpcli_reason="wp-cli unavailable"
+  fi
+
+  {
+    echo "=== WordPress Security Hardening Suite (Safe) ==="
+    echo "Timestamp: ${timestamp}"
+    echo "Site path: ${wp_path}"
+    echo "wp-cli ready: ${wpcli_ready}"
+    echo "wp installed: ${wpcli_installed}"
+    if [ -n "$wpcli_reason" ]; then
+      echo "wp-cli status note: ${wpcli_reason}"
+    fi
+    echo
+    echo "Subtasks:"
+  } >"$suite_report"
+
+  run_security_suite_task() {
+    local name func report require_wpcli status rc note
+    name="$1"
+    func="$2"
+    report="$3"
+    require_wpcli="$4"
+    status="ran"
+    rc=0
+    note=""
+
+    if [ "$require_wpcli" = "yes" ] && { [ "$wpcli_ready" != "yes" ] || [ "$wpcli_installed" != "yes" ]; }; then
+      status="skipped"
+      rc="skipped"
+      note="${wpcli_reason:-wp-cli not ready}"
+      skipped_count=$((skipped_count + 1))
+    else
+      if "$func"; then
+        rc=0
+      else
+        rc=$?
+        failed_count=$((failed_count + 1))
+      fi
+      ran_count=$((ran_count + 1))
+    fi
+
+    {
+      echo "- ${name}"
+      echo "  status: ${status}"
+      echo "  return_code: ${rc}"
+      if [ -n "$report" ]; then
+        echo "  report: ${report}"
+      else
+        echo "  report: n/a"
+      fi
+      if [ -n "$note" ]; then
+        echo "  note: ${note}"
+      fi
+      echo
+    } >>"$suite_report"
+  }
+
+  run_security_suite_task "Security snapshot" "opt_task_security_snapshot" "/tmp/hz-wp-security-snapshot.txt" "yes"
+  run_security_suite_task "Hardening check" "opt_task_hardening_check" "/tmp/hz-wp-hardening-check.txt" "yes"
+  run_security_suite_task "wp-config hardening (safe)" "opt_task_wp_config_hardening_safe" "/tmp/hz-wp-config-hardening.txt" "yes"
+  run_security_suite_task "Filesystem permissions hardening (safe)" "opt_task_permissions_hardening_safe" "/tmp/hz-wp-permissions-hardening.txt" "yes"
+  run_security_suite_task "XML-RPC block (safe)" "opt_task_xmlrpc_block_safe" "/tmp/hz-wp-xmlrpc-block.txt" "no"
+  run_security_suite_task "Uploads PHP execution block (safe)" "opt_task_uploads_php_block_safe" "/tmp/hz-wp-uploads-php-block.txt" "no"
+  run_security_suite_task "Sensitive files web access block (safe)" "opt_task_sensitive_files_block_safe" "/tmp/hz-wp-sensitive-files-block.txt" "no"
+  run_security_suite_task "Directory listing block (safe)" "opt_task_directory_listing_block_safe" "/tmp/hz-wp-dirlisting-block.txt" "no"
+
+  {
+    echo "Summary:"
+    echo "  ran: ${ran_count}"
+    echo "  skipped: ${skipped_count}"
+    echo "  failed: ${failed_count}"
+    echo "Report path: ${suite_report}"
+  } >>"$suite_report"
+
+  if [ "$failed_count" -gt 0 ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Security hardening suite completed with failures. Report: ${suite_report}"
+    else
+      log_warn "安全加固合集完成（存在失败）。报告：${suite_report}"
+    fi
+    return 1
+  fi
+
+  if [ "$lang" = "en" ]; then
+    log_ok "Security hardening suite completed. Report: ${suite_report}"
+  else
+    log_ok "安全加固合集完成。报告：${suite_report}"
   fi
   return 0
 }
@@ -2197,14 +2335,15 @@ show_optimize_menu() {
       echo "  9) Optimize: Plugin cleanup (inactive plugins)"
       echo " 10) Optimize: Security snapshot"
       echo " 11) Optimize: Hardening check"
-      echo " 12) Optimize: wp-config hardening (safe)"
-      echo " 13) Optimize: Filesystem permissions (safe)"
-      echo " 14) Optimize: Sensitive files web access block (safe)"
-      echo " 15) Optimize: XML-RPC block (safe)"
-      echo " 16) Optimize: Directory listing block (safe)"
-      echo " 17) Uploads: block PHP execution (safe)"
+      echo " 12) Optimize: Security hardening suite (safe)"
+      echo " 13) Optimize: wp-config hardening (safe)"
+      echo " 14) Optimize: Filesystem permissions (safe)"
+      echo " 15) Optimize: Sensitive files web access block (safe)"
+      echo " 16) Optimize: XML-RPC block (safe)"
+      echo " 17) Optimize: Directory listing block (safe)"
+      echo " 18) Uploads: block PHP execution (safe)"
       echo "  0) Back / Exit"
-      read -rp "Choose [0-17]: " choice
+      read -rp "Choose [0-18]: " choice
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) Optimize：LSCWP（启用）"
@@ -2218,14 +2357,15 @@ show_optimize_menu() {
       echo "  9) Optimize：清理插件（未启用插件）"
       echo " 10) Optimize：安全快照"
       echo " 11) Optimize：加固检查"
-      echo " 12) 优化：wp-config 轻量加固（安全）"
-      echo " 13) 优化：文件权限（安全）"
-      echo " 14) 优化：敏感文件 Web 访问阻止（安全）"
-      echo " 15) 优化：屏蔽 XML-RPC（安全）"
-      echo " 16) 优化：禁止目录浏览（安全）"
-      echo " 17) Uploads：禁止 PHP 执行（安全）"
+      echo " 12) Optimize：安全加固合集（安全）"
+      echo " 13) 优化：wp-config 轻量加固（安全）"
+      echo " 14) 优化：文件权限（安全）"
+      echo " 15) 优化：敏感文件 Web 访问阻止（安全）"
+      echo " 16) 优化：屏蔽 XML-RPC（安全）"
+      echo " 17) 优化：禁止目录浏览（安全）"
+      echo " 18) Uploads：禁止 PHP 执行（安全）"
       echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-17]: " choice
+      read -rp "请输入选项 [0-18]: " choice
     fi
 
     case "$choice" in
@@ -2310,7 +2450,7 @@ show_optimize_menu() {
         return 1
         ;;
       12)
-        if opt_task_wp_config_hardening_safe; then
+        if opt_task_security_hardening_suite_safe; then
           optimize_finish_menu
           return 0
         fi
@@ -2318,7 +2458,7 @@ show_optimize_menu() {
         return 1
         ;;
       13)
-        if opt_task_permissions_hardening_safe; then
+        if opt_task_wp_config_hardening_safe; then
           optimize_finish_menu
           return 0
         fi
@@ -2326,7 +2466,7 @@ show_optimize_menu() {
         return 1
         ;;
       14)
-        if opt_task_sensitive_files_block_safe; then
+        if opt_task_permissions_hardening_safe; then
           optimize_finish_menu
           return 0
         fi
@@ -2334,7 +2474,7 @@ show_optimize_menu() {
         return 1
         ;;
       15)
-        if opt_task_xmlrpc_block_safe; then
+        if opt_task_sensitive_files_block_safe; then
           optimize_finish_menu
           return 0
         fi
@@ -2342,7 +2482,7 @@ show_optimize_menu() {
         return 1
         ;;
       16)
-        if opt_task_directory_listing_block_safe; then
+        if opt_task_xmlrpc_block_safe; then
           optimize_finish_menu
           return 0
         fi
@@ -2350,6 +2490,14 @@ show_optimize_menu() {
         return 1
         ;;
       17)
+        if opt_task_directory_listing_block_safe; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      18)
         if opt_task_uploads_php_block_safe; then
           optimize_finish_menu
           return 0
