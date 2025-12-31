@@ -26,8 +26,8 @@ BASELINE_TRIAGE_LIB="${REPO_ROOT}/lib/baseline_triage.sh"
 cd /
 
 # install-lomp-lnmp-standard.sh
-# Version: v1.0.0-beta.2
-# Date: 2025-01-01
+# Version: v1.0.0-rc.1
+# Date: 2025-01-02
 # 更新记录:
 # - v0.9:
 #   - 完成"彻底移除本机 OLS""按 slug 清理站点"后，不再直接退出脚本，
@@ -747,6 +747,7 @@ opt_task_theme_cleanup() {
   local themes_raw themes=()
   local candidates=()
   local theme
+  local has_twentyfour="no"
   lang="$(get_finish_lang)"
 
   log_step "Optimize: Theme cleanup (default themes)"
@@ -754,7 +755,7 @@ opt_task_theme_cleanup() {
     return 1
   fi
 
-  if ! ensure_wp_cli; then
+  if ! command -v wp >/dev/null 2>&1; then
     if [ "$lang" = "en" ]; then
       log_warn "wp-cli not ready; skip theme cleanup."
     else
@@ -764,6 +765,15 @@ opt_task_theme_cleanup() {
   fi
 
   wp_path="${OPT_WP_PATH:-}"
+  if ! wp --path="$wp_path" --allow-root core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+    if [ "$lang" = "en" ]; then
+      log_warn "WordPress not installed; skip theme cleanup."
+    else
+      log_warn "WordPress 尚未安装，跳过主题清理。"
+    fi
+    return 1
+  fi
+
   if ! themes_raw="$(wp --path="$wp_path" --allow-root theme list --field=name --skip-plugins --skip-themes 2>/dev/null)"; then
     if [ "$lang" = "en" ]; then
       log_warn "Cannot determine themes; skipping cleanup for safety."
@@ -792,6 +802,30 @@ opt_task_theme_cleanup() {
       log_warn "无法确定主题列表，出于安全原因跳过清理。"
     fi
     return 1
+  fi
+
+  for theme in "${themes[@]}"; do
+    if [ "$theme" = "twentytwentyfour" ]; then
+      has_twentyfour="yes"
+      break
+    fi
+  done
+
+  if [ "$active_theme" = "twentytwentythree" ] && [ "$has_twentyfour" = "yes" ]; then
+    if wp --path="$wp_path" --allow-root theme activate twentytwentyfour --skip-plugins --skip-themes >/dev/null 2>&1; then
+      active_theme="twentytwentyfour"
+      if [ "$lang" = "en" ]; then
+        log_ok "Activated twentytwentyfour to replace twentytwentythree."
+      else
+        log_ok "已启用 twentytwentyfour 替换 twentytwentythree。"
+      fi
+    else
+      if [ "$lang" = "en" ]; then
+        log_warn "Failed to activate twentytwentyfour; keep current theme."
+      else
+        log_warn "无法启用 twentytwentyfour，保持当前主题。"
+      fi
+    fi
   fi
 
   for theme in "${themes[@]}"; do
@@ -2507,6 +2541,9 @@ run_optimize_wizard() {
   local paths_unwritable=0
   local check_paths=()
   local check_path
+  local image_engine_status="GD (Basic)"
+  local php_bin=""
+  local php_modules=""
 
   lang="$(get_finish_lang)"
 
@@ -2612,6 +2649,17 @@ run_optimize_wizard() {
     permissions_status="Needs Fix"
   fi
 
+  php_bin="/usr/local/lsws/${LSPHP_VER}/bin/php"
+  if [ ! -x "$php_bin" ] && command -v php >/dev/null 2>&1; then
+    php_bin="$(command -v php)"
+  fi
+  if [ -x "$php_bin" ]; then
+    php_modules="$("$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]')" || php_modules=""
+    if printf '%s\n' "$php_modules" | grep -qx "imagick"; then
+      image_engine_status="Imagick (Excellent)"
+    fi
+  fi
+
   echo
   if [ "$lang" = "en" ]; then
     echo "=== Smart Optimize Scan ==="
@@ -2620,6 +2668,7 @@ run_optimize_wizard() {
     printf "  %-16s %s\n" "Indexing:" "$indexing_status"
     printf "  %-16s %s\n" "Security blocks:" "$security_status"
     printf "  %-16s %s\n" "Permissions:" "$permissions_status"
+    printf "  %-16s %s\n" "Image Engine:" "$image_engine_status"
   else
     echo "=== Smart Optimize 扫描结果 ==="
     printf "  %-16s %s\n" "LSCWP:" "$lscwp_status"
@@ -2627,6 +2676,7 @@ run_optimize_wizard() {
     printf "  %-16s %s\n" "索引策略:" "$indexing_status"
     printf "  %-16s %s\n" "安全阻断:" "$security_status"
     printf "  %-16s %s\n" "权限检查:" "$permissions_status"
+    printf "  %-16s %s\n" "Image Engine:" "$image_engine_status"
   fi
 
   if [ -t 0 ] && [ -t 1 ]; then
@@ -5877,71 +5927,137 @@ ensure_php_ini_block() {
   } >>"$ini"
 }
 
-replace_or_mark_php_ini_value() {
+set_or_append_php_ini_value() {
   local ini="$1"
   local key="$2"
   local value="$3"
 
   if grep -Eq "^[[:space:]]*;?[[:space:]]*${key}[[:space:]]*=" "$ini"; then
-    sed -i "s|^[[:space:]]*;?[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$ini"
+    if grep -Eq "^[[:space:]]*;?[[:space:]]*${key}[[:space:]]*=[[:space:]]*${value}[[:space:]]*$" "$ini"; then
+      return 1
+    fi
+    sed -i -E "s|^[[:space:]]*;?[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$ini"
     return 0
   fi
 
-  return 1
+  ensure_php_ini_block "$ini"
+  sed -i "/HZ-ONECLICK: php.ini tuning END/i ${key} = ${value}" "$ini"
+  return 0
 }
 
 apply_lsphp_ini_tuning() {
   # [ANCHOR:APPLY_LSPHP_INI_TUNING]
-  local ini=""
   local ini_hash_before ini_hash_after
-  local missing=()
   local key
   local value
   local backup
+  local candidates=()
+  local ini_files=()
+  local candidate
+  local existing
+  local changed_files=()
+  local php_bin=""
+  local verify_bin=""
+  local reported="no"
+  local memory_current=""
+  local upload_current=""
+  local post_current=""
 
-  if ! ini="$(find_lsphp_ini_path)"; then
-    log_warn "未检测到 LSPHP php.ini，跳过 PHP 参数调优。/ php.ini not found, skipping tuning."
-    return 1
+  if [ -n "${LSPHP_VER:-}" ]; then
+    candidates+=("/usr/local/lsws/${LSPHP_VER}/etc/php.ini")
+    candidates+=("/usr/local/lsws/${LSPHP_VER}/etc/php/"*/litespeed/php.ini)
+    candidates+=("/usr/local/lsws/${LSPHP_VER}/etc/php/"*/cli/php.ini)
   fi
+  candidates+=("/usr/local/lsws/lsphp"*/etc/php/*/litespeed/php.ini)
 
-  if [ ! -f "$ini" ]; then
-    log_warn "未检测到 LSPHP php.ini，跳过 PHP 参数调优。/ php.ini not found, skipping tuning."
-    return 1
-  fi
-
-  backup="${ini}.bak"
-  if [ ! -f "$backup" ]; then
-    if ! cp -p "$ini" "$backup" 2>/dev/null; then
-      log_warn "php.ini 备份失败，仍尝试继续调整。/ Backup failed, continuing."
+  php_bin="/usr/local/lsws/${LSPHP_VER}/bin/php"
+  if [ -x "$php_bin" ]; then
+    candidate="$(get_lsphp_ini_path "$php_bin" 2>/dev/null || true)"
+    if [ -n "$candidate" ]; then
+      candidates+=("$candidate")
     fi
   fi
 
-  ini_hash_before="$(sha256sum "$ini" | awk '{print $1}')"
-
-  for key in upload_max_filesize post_max_size memory_limit; do
-    case "$key" in
-      upload_max_filesize) value="64M" ;;
-      post_max_size) value="64M" ;;
-      memory_limit) value="256M" ;;
-    esac
-
-    if ! replace_or_mark_php_ini_value "$ini" "$key" "$value"; then
-      missing+=("${key}=${value}")
+  for candidate in "${candidates[@]}"; do
+    if [ -f "$candidate" ]; then
+      for existing in "${ini_files[@]}"; do
+        if [ "$existing" = "$candidate" ]; then
+          continue 2
+        fi
+      done
+      ini_files+=("$candidate")
     fi
   done
 
-  if [ "${#missing[@]}" -gt 0 ]; then
-    ensure_php_ini_block "$ini"
-    for key in "${missing[@]}"; do
-      sed -i "/HZ-ONECLICK: php.ini tuning END/i ${key/=/ = }" "$ini"
-    done
+  if [ "${#ini_files[@]}" -eq 0 ]; then
+    log_warn "未检测到 LSPHP php.ini，跳过 PHP 参数调优。/ php.ini not found, skipping tuning."
+    return 1
   fi
 
-  ini_hash_after="$(sha256sum "$ini" | awk '{print $1}')"
-  if [ "$ini_hash_before" != "$ini_hash_after" ]; then
-    log_info "已更新 php.ini（${ini}）用于 OLS/LSPHP 调优。/ php.ini tuned."
+  for candidate in "${ini_files[@]}"; do
+    backup="${candidate}.bak"
+    if [ ! -f "$backup" ]; then
+      if ! cp -p "$candidate" "$backup" 2>/dev/null; then
+        log_warn "php.ini 备份失败，仍尝试继续调整。/ Backup failed, continuing."
+      fi
+    fi
+
+    ini_hash_before="$(sha256sum "$candidate" | awk '{print $1}')"
+
+    for key in upload_max_filesize post_max_size memory_limit; do
+      case "$key" in
+        upload_max_filesize) value="64M" ;;
+        post_max_size) value="64M" ;;
+        memory_limit) value="256M" ;;
+      esac
+
+      set_or_append_php_ini_value "$candidate" "$key" "$value" || true
+    done
+
+    ini_hash_after="$(sha256sum "$candidate" | awk '{print $1}')"
+    if [ "$ini_hash_before" != "$ini_hash_after" ]; then
+      changed_files+=("$candidate")
+    fi
+  done
+
+  if [ "${#changed_files[@]}" -gt 0 ]; then
+    log_info "已更新 php.ini：${changed_files[*]} / php.ini tuned."
   else
     log_info "php.ini 已符合 OLS/LSPHP 调优要求，无需修改。/ php.ini already tuned."
+  fi
+
+  if systemctl restart lsws >/dev/null 2>&1; then
+    log_info "已重启 lsws 服务以应用 PHP 配置。"
+  else
+    if service lsws restart >/dev/null 2>&1; then
+      log_info "已重启 lsws 服务以应用 PHP 配置。"
+    else
+      log_warn "lsws 重启失败，请手动重启服务。"
+    fi
+  fi
+
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -f 'lsphp' >/dev/null 2>&1 || true
+  elif command -v killall >/dev/null 2>&1; then
+    killall lsphp >/dev/null 2>&1 || true
+  fi
+
+  verify_bin="/usr/local/lsws/${LSPHP_VER}/bin/php"
+  if [ ! -x "$verify_bin" ] && command -v php >/dev/null 2>&1; then
+    verify_bin="$(command -v php)"
+  fi
+  if [ -x "$verify_bin" ]; then
+    memory_current="$("$verify_bin" -i 2>/dev/null | awk -F'=> ' '/^memory_limit/ {print $2; exit}')"
+    upload_current="$("$verify_bin" -i 2>/dev/null | awk -F'=> ' '/^upload_max_filesize/ {print $2; exit}')"
+    post_current="$("$verify_bin" -i 2>/dev/null | awk -F'=> ' '/^post_max_size/ {print $2; exit}')"
+    if [ -n "$memory_current" ] || [ -n "$upload_current" ] || [ -n "$post_current" ]; then
+      log_info "PHP 运行值: memory_limit=${memory_current:-unknown}, upload_max_filesize=${upload_current:-unknown}, post_max_size=${post_current:-unknown}"
+      reported="yes"
+    fi
+  fi
+
+  if [ "$reported" = "no" ]; then
+    log_warn "无法自动验证 PHP 运行值，请手动执行：/usr/local/lsws/${LSPHP_VER}/bin/php -i | egrep 'memory_limit|upload_max_filesize|post_max_size'"
   fi
 
   return 0
@@ -7142,6 +7258,13 @@ install_packages() {
     apt_get_install_retry "${LSPHP_VER}" "${LSPHP_VER}-common" "${LSPHP_VER}-mysql" "${LSPHP_VER}-opcache" "${LSPHP_VER}-curl"
   else
     log_info "检测到 ${LSPHP_VER} 已安装，跳过。"
+  fi
+
+  if ! dpkg -l | grep -q "^ii[[:space:]]\\+${LSPHP_VER}-imagick[[:space:]]"; then
+    log_info "安装 ${LSPHP_VER}-imagick（Imagick 扩展）..."
+    apt_get_install_retry "${LSPHP_VER}-imagick" imagemagick
+  else
+    log_info "检测到 ${LSPHP_VER}-imagick 已安装，跳过。"
   fi
 
   if [ "${INSTALL_MODE:-full}" = "frontend" ]; then
