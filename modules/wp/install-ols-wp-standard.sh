@@ -26,8 +26,8 @@ BASELINE_TRIAGE_LIB="${REPO_ROOT}/lib/baseline_triage.sh"
 cd /
 
 # install-lomp-lnmp-standard.sh
-# Version: v1.0.0-beta.1
-# Date: 2025-12-31
+# Version: v1.0.0-beta.2
+# Date: 2025-01-01
 # 更新记录:
 # - v0.9:
 #   - 完成"彻底移除本机 OLS""按 slug 清理站点"后，不再直接退出脚本，
@@ -63,6 +63,7 @@ SITE_SIZE_CHECK_SERVICE=""
 SITE_SIZE_CHECK_TIMER=""
 LSPHP_EXTENSIONS_APT_UPDATED=0
 : "${INSTALL_MODE:=full}"
+: "${WP_INSTALL_SKIPPED:=0}"
 
 if [ -r "$COMMON_LIB" ]; then
   # shellcheck source=/dev/null
@@ -213,6 +214,30 @@ log_error() {
 log_step()  {
   # [ANCHOR:LOG_STEP]
   echo -e "\n${CYAN}==== $* ====${NC}\n"
+}
+
+wp_installation_skipped() {
+  [ "${WP_INSTALL_SKIPPED:-0}" -eq 1 ]
+}
+
+wp_install_ready() {
+  if wp_installation_skipped; then
+    return 1
+  fi
+
+  if ! command -v wp >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    return 1
+  fi
+
+  if ! wp --path="$DOC_ROOT" --allow-root core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
 }
 
 get_install_mode_label() {
@@ -580,6 +605,29 @@ opt_prepare_context() {
   return 0
 }
 
+opt_task_fix_permissions() {
+  local lang
+  lang="$(get_finish_lang)"
+
+  if [ "$lang" = "en" ]; then
+    log_step "Optimize: Filesystem permissions"
+  else
+    log_step "优化：文件权限"
+  fi
+
+  if ! opt_prepare_context "no-wpcli"; then
+    return 1
+  fi
+
+  fix_permissions
+  if [ "$lang" = "en" ]; then
+    log_info "Permissions checked."
+  else
+    log_info "权限检查完成。"
+  fi
+  return 0
+}
+
 opt_task_lscwp() {
   local lang
   local wp_path
@@ -696,7 +744,7 @@ opt_task_baseline_cleanup() {
 
 opt_task_theme_cleanup() {
   local lang wp_path active_theme
-  local inactive_themes_raw inactive_themes=()
+  local themes_raw themes=()
   local candidates=()
   local theme
   lang="$(get_finish_lang)"
@@ -716,23 +764,41 @@ opt_task_theme_cleanup() {
   fi
 
   wp_path="${OPT_WP_PATH:-}"
-  active_theme="$(wp --path="$wp_path" --allow-root theme list --status=active --field=stylesheet --skip-plugins --skip-themes 2>/dev/null | head -n 1)"
-  if [ -z "$active_theme" ]; then
+  if ! themes_raw="$(wp --path="$wp_path" --allow-root theme list --field=name --skip-plugins --skip-themes 2>/dev/null)"; then
     if [ "$lang" = "en" ]; then
-      log_warn "Unable to detect active theme; skip cleanup."
+      log_warn "Cannot determine themes; skipping cleanup for safety."
     else
-      log_warn "无法检测当前启用主题，跳过清理。"
+      log_warn "无法确定主题列表，出于安全原因跳过清理。"
     fi
     return 1
   fi
 
-  inactive_themes_raw="$(wp --path="$wp_path" --allow-root theme list --status=inactive --field=stylesheet --skip-plugins --skip-themes 2>/dev/null || true)"
-  if [ -n "$inactive_themes_raw" ]; then
-    mapfile -t inactive_themes <<<"$inactive_themes_raw"
+  if [ -z "$themes_raw" ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Cannot determine themes; skipping cleanup for safety."
+    else
+      log_warn "无法确定主题列表，出于安全原因跳过清理。"
+    fi
+    return 1
   fi
 
-  for theme in "${inactive_themes[@]}"; do
-    if [[ "$theme" =~ ^twentytwenty ]] && [ "$theme" != "$active_theme" ]; then
+  mapfile -t themes <<<"$themes_raw"
+
+  active_theme="$(wp --path="$wp_path" --allow-root theme list --status=active --field=name --skip-plugins --skip-themes 2>/dev/null | head -n 1)"
+  if [ -z "$active_theme" ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Cannot determine themes; skipping cleanup for safety."
+    else
+      log_warn "无法确定主题列表，出于安全原因跳过清理。"
+    fi
+    return 1
+  fi
+
+  for theme in "${themes[@]}"; do
+    if [[ "$theme" =~ ^twentytwenty ]]; then
+      if [ "$theme" = "twentytwentyfour" ] || [ "$theme" = "$active_theme" ]; then
+        continue
+      fi
       candidates+=("$theme")
     fi
   done
@@ -2424,24 +2490,205 @@ ${end_marker}"
   return 0
 }
 
-show_optimize_menu() {
-  local lang choice
+run_optimize_wizard() {
+  local lang doc_root
+  local wp_cli_ready="no"
+  local wp_installed="no"
+  local lscwp_status="Pending"
+  local permalinks_status="Pending"
+  local indexing_status="Pending"
+  local security_status="Needs Fix"
+  local permissions_status="Needs Fix"
+  local choice
+  local permalink_structure blog_public
+  local htaccess_path uploads_htaccess_path
+  local has_security_marker="no"
+  local paths_missing=0
+  local paths_unwritable=0
+  local check_paths=()
+  local check_path
+
   lang="$(get_finish_lang)"
 
-  if [ ! -t 0 ]; then
-    if [ "$lang" = "en" ]; then
-      echo "Optimize menu requires interactive mode. Re-run with:"
-    else
-      echo "Optimize 菜单需要交互模式，请重新运行："
-    fi
-    print_optimize_rerun_command
-    return 0
+  if [ "$lang" = "en" ]; then
+    log_step "Smart Optimize (Wizard)"
+  else
+    log_step "Smart Optimize（推荐）"
   fi
+
+  if ! opt_prepare_context "no-wpcli"; then
+    return 1
+  fi
+
+  doc_root="${OPT_WP_PATH:-${DOC_ROOT:-}}"
+  if [ -z "$doc_root" ] || [ ! -d "$doc_root" ]; then
+    if [ "$lang" = "en" ]; then
+      log_warn "Site root not detected; skip Smart Optimize."
+    else
+      log_warn "未检测到站点目录，跳过 Smart Optimize。"
+    fi
+    return 1
+  fi
+
+  if command -v wp >/dev/null 2>&1; then
+    wp_cli_ready="yes"
+  fi
+
+  if [ "$wp_cli_ready" = "yes" ] && ! wp_installation_skipped; then
+    if wp --path="$doc_root" --allow-root core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+      wp_installed="yes"
+    fi
+  fi
+
+  if [ "$wp_installed" = "yes" ]; then
+    if wp --path="$doc_root" --allow-root plugin is-active litespeed-cache --skip-plugins --skip-themes >/dev/null 2>&1; then
+      lscwp_status="OK"
+    else
+      lscwp_status="Needs Fix"
+    fi
+
+    permalink_structure="$(wp --path="$doc_root" --allow-root option get permalink_structure --skip-plugins --skip-themes 2>/dev/null || true)"
+    if [ -z "$permalink_structure" ] || [ "$permalink_structure" = "/index.php/%year%/%monthnum%/%day%/%postname%/" ]; then
+      permalinks_status="Needs Fix"
+    else
+      permalinks_status="OK"
+    fi
+
+    blog_public="$(wp --path="$doc_root" --allow-root option get blog_public --skip-plugins --skip-themes 2>/dev/null || true)"
+    if [ "$blog_public" = "0" ]; then
+      indexing_status="Discouraged (User decision)"
+    elif [ "$blog_public" = "1" ]; then
+      indexing_status="Allowed"
+    else
+      indexing_status="Pending"
+    fi
+  else
+    lscwp_status="Pending (WP not installed)"
+    permalinks_status="Pending (WP not installed)"
+    indexing_status="Pending (WP not installed)"
+  fi
+
+  htaccess_path="${doc_root}/.htaccess"
+  uploads_htaccess_path="${doc_root}/wp-content/uploads/.htaccess"
+  if [ -f "$htaccess_path" ]; then
+    security_status="OK"
+    if grep -Fq "# BEGIN HZ SENSITIVE FILES BLOCK" "$htaccess_path" \
+      || grep -Fq "# BEGIN HZ-ONECLICK XMLRPC BLOCK" "$htaccess_path" \
+      || grep -Fq "# HZ-ONECLICK: directory listing block (safe) BEGIN" "$htaccess_path"; then
+      has_security_marker="yes"
+    fi
+  fi
+  if [ -f "$uploads_htaccess_path" ] && grep -Fq "# BEGIN HZ UPLOADS PHP BLOCK" "$uploads_htaccess_path"; then
+    has_security_marker="yes"
+  fi
+  if [ "$security_status" != "OK" ] && [ "$has_security_marker" = "yes" ]; then
+    security_status="OK"
+  fi
+  if [ "$security_status" != "OK" ] && [ "$has_security_marker" = "no" ]; then
+    security_status="Needs Fix"
+  fi
+
+  check_paths+=(
+    "${doc_root}/wp-content"
+    "${doc_root}/wp-content/uploads"
+    "${doc_root}/wp-content/upgrade"
+    "${doc_root}/wp-content/languages"
+    "${doc_root}/wp-content/uploads/fonts"
+  )
+
+  for check_path in "${check_paths[@]}"; do
+    if [ ! -d "$check_path" ]; then
+      paths_missing=$((paths_missing + 1))
+      continue
+    fi
+    if [ ! -w "$check_path" ]; then
+      paths_unwritable=$((paths_unwritable + 1))
+    fi
+  done
+
+  if [ "$paths_missing" -eq 0 ] && [ "$paths_unwritable" -eq 0 ]; then
+    permissions_status="OK"
+  else
+    permissions_status="Needs Fix"
+  fi
+
+  echo
+  if [ "$lang" = "en" ]; then
+    echo "=== Smart Optimize Scan ==="
+    printf "  %-16s %s\n" "LSCWP:" "$lscwp_status"
+    printf "  %-16s %s\n" "Permalinks:" "$permalinks_status"
+    printf "  %-16s %s\n" "Indexing:" "$indexing_status"
+    printf "  %-16s %s\n" "Security blocks:" "$security_status"
+    printf "  %-16s %s\n" "Permissions:" "$permissions_status"
+  else
+    echo "=== Smart Optimize 扫描结果 ==="
+    printf "  %-16s %s\n" "LSCWP:" "$lscwp_status"
+    printf "  %-16s %s\n" "固定链接:" "$permalinks_status"
+    printf "  %-16s %s\n" "索引策略:" "$indexing_status"
+    printf "  %-16s %s\n" "安全阻断:" "$security_status"
+    printf "  %-16s %s\n" "权限检查:" "$permissions_status"
+  fi
+
+  if [ -t 0 ] && [ -t 1 ]; then
+    read -rp "Apply all recommended optimizations now? [Y/n] " choice
+    choice="${choice:-Y}"
+  else
+    choice="Y"
+  fi
+
+  case "$choice" in
+    [Nn]*)
+      return 0
+      ;;
+    *)
+      ;;
+  esac
+
+  if [ "$wp_installed" = "yes" ]; then
+    opt_task_baseline_cleanup || true
+  else
+    if [ "$lang" = "en" ]; then
+      log_warn "WordPress not installed; skip baseline cleanup (run after install)."
+    else
+      log_warn "WordPress 尚未安装，跳过基线清理（安装后再运行）。"
+    fi
+  fi
+
+  opt_task_fix_permissions || true
+
+  if [ "$wp_installed" = "yes" ]; then
+    opt_task_lscwp || true
+    opt_task_permalinks || true
+  else
+    if [ "$lang" = "en" ]; then
+      log_warn "WordPress not installed; skip LSCWP and permalinks (run after install)."
+    else
+      log_warn "WordPress 尚未安装，跳过 LSCWP/固定链接（安装后再运行）。"
+    fi
+  fi
+
+  opt_task_xmlrpc_block_safe || true
+  opt_task_directory_listing_block_safe || true
+  opt_task_uploads_php_block_safe || true
+  opt_task_sensitive_files_block_safe || true
+
+  if [ "$lang" = "en" ]; then
+    log_ok "Smart Optimize completed."
+  else
+    log_ok "Smart Optimize 已完成。"
+  fi
+
+  return 0
+}
+
+show_optimize_advanced_menu() {
+  local lang choice
+  lang="$(get_finish_lang)"
 
   while true; do
     echo
     if [ "$lang" = "en" ]; then
-      echo "=== Optimize Menu ==="
+      echo "=== Optimize Menu (Advanced) ==="
       echo "  1) Optimize: LSCWP (enable)"
       echo "  2) Optimize: baseline cleanup"
       echo "  3) Optimize: Permalinks"
@@ -2460,10 +2707,10 @@ show_optimize_menu() {
       echo " 16) Optimize: XML-RPC block (safe)"
       echo " 17) Optimize: Directory listing block (safe)"
       echo " 18) Uploads: block PHP execution (safe)"
-      echo "  0) Back / Exit"
+      echo "  0) Back"
       read -rp "Choose [0-18]: " choice
     else
-      echo "=== Optimize 菜单 ==="
+      echo "=== Optimize 菜单（高级） ==="
       echo "  1) Optimize：LSCWP（启用）"
       echo "  2) Optimize：基线清理"
       echo "  3) Optimize：固定链接"
@@ -2482,7 +2729,7 @@ show_optimize_menu() {
       echo " 16) 优化：屏蔽 XML-RPC（安全）"
       echo " 17) 优化：禁止目录浏览（安全）"
       echo " 18) Uploads：禁止 PHP 执行（安全）"
-      echo "  0) 返回 / 退出"
+      echo "  0) 返回"
       read -rp "请输入选项 [0-18]: " choice
     fi
 
@@ -2630,6 +2877,62 @@ show_optimize_menu() {
         fi
         optimize_finish_menu
         return 1
+        ;;
+      0)
+        return 0
+        ;;
+      *)
+        if [ "$lang" = "en" ]; then
+          echo "Invalid choice, please try again."
+        else
+          echo "无效选项，请重试。"
+        fi
+        ;;
+    esac
+  done
+}
+
+show_optimize_menu() {
+  local lang choice
+  lang="$(get_finish_lang)"
+
+  if [ ! -t 0 ]; then
+    if [ "$lang" = "en" ]; then
+      echo "Optimize menu requires interactive mode. Re-run with:"
+    else
+      echo "Optimize 菜单需要交互模式，请重新运行："
+    fi
+    print_optimize_rerun_command
+    return 0
+  fi
+
+  while true; do
+    echo
+    if [ "$lang" = "en" ]; then
+      echo "=== Optimize Menu ==="
+      echo "  1) 🚀 Smart Optimize (Recommended)"
+      echo "  2) Advanced / Manual Selection"
+      echo "  0) Back / Exit"
+      read -rp "Choose [0-2]: " choice
+    else
+      echo "=== Optimize 菜单 ==="
+      echo "  1) 🚀 Smart Optimize（推荐）"
+      echo "  2) 高级 / 手动选择"
+      echo "  0) 返回 / 退出"
+      read -rp "请输入选项 [0-2]: " choice
+    fi
+
+    case "$choice" in
+      1)
+        if run_optimize_wizard; then
+          optimize_finish_menu
+          return 0
+        fi
+        optimize_finish_menu
+        return 1
+        ;;
+      2)
+        show_optimize_advanced_menu
         ;;
       0)
         if is_menu_context; then
@@ -5875,6 +6178,10 @@ wp_cli_base() {
 }
 
 lscwp_is_active() {
+  if wp_installation_skipped; then
+    return 1
+  fi
+
   if ! command -v wp >/dev/null 2>&1; then
     return 1
   fi
@@ -5932,6 +6239,11 @@ ensure_lscache_only() {
 
 ensure_wp_cache() {
   # [ANCHOR:WP_CACHE_ENABLE]
+  if wp_installation_skipped; then
+    log_warn "已选择浏览器完成安装，跳过 WP_CACHE 设置。"
+    return
+  fi
+
   if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
     log_warn "未找到站点目录，跳过 WP_CACHE 设置。"
     return
@@ -5967,47 +6279,23 @@ ensure_uploads_fonts_dir() {
   # [ANCHOR:UPLOADS_FONTS_DIR]
   local uploads_basedir=""
   local fonts_dir=""
-  local uploads_owner_group=""
-  local uploads_mode=""
   local fonts_mode=""
-  local owner_digit=""
-  local group_digit=""
-  local writable="no"
 
-  if command -v wp >/dev/null 2>&1; then
-    if [ -n "${DOC_ROOT:-}" ] && [ -d "$DOC_ROOT" ]; then
-      if wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
-        uploads_basedir="$(wp_cli_base eval 'echo wp_upload_dir()["basedir"];' 2>/dev/null || true)"
-      fi
-    fi
+  if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
+    return
   fi
 
-  if [ -z "$uploads_basedir" ]; then
-    if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
-      return
-    fi
-    uploads_basedir="${DOC_ROOT}/wp-content/uploads"
-  fi
-
-  mkdir -p "$uploads_basedir" >/dev/null 2>&1 || true
-  uploads_owner_group="$(stat -c '%u:%g' "$uploads_basedir" 2>/dev/null || true)"
-  uploads_mode="$(stat -c '%a' "$uploads_basedir" 2>/dev/null || true)"
+  uploads_basedir="${DOC_ROOT}/wp-content/uploads"
   fonts_dir="${uploads_basedir}/fonts"
 
   if mkdir -p "$fonts_dir" 2>/dev/null; then
-    if [ -n "$uploads_owner_group" ]; then
-      chown "$uploads_owner_group" "$fonts_dir" >/dev/null 2>&1 || true
-    elif id -u www-data >/dev/null 2>&1; then
-      chown www-data:www-data "$fonts_dir" >/dev/null 2>&1 || true
-    elif id -u nobody >/dev/null 2>&1 && getent group nogroup >/dev/null 2>&1; then
+    if id -u nobody >/dev/null 2>&1 && getent group nogroup >/dev/null 2>&1; then
       chown nobody:nogroup "$fonts_dir" >/dev/null 2>&1 || true
+    else
+      log_warn "未找到 nobody:nogroup，无法设置 fonts 目录属主。"
     fi
 
-    if [ -n "$uploads_mode" ]; then
-      chmod "$uploads_mode" "$fonts_dir" >/dev/null 2>&1 || true
-    else
-      chmod 775 "$fonts_dir" >/dev/null 2>&1 || true
-    fi
+    chmod 755 "$fonts_dir" >/dev/null 2>&1 || true
     log_info "已确保 fonts 目录存在：${fonts_dir}"
   else
     log_warn "fonts 目录创建失败：${fonts_dir}"
@@ -6015,24 +6303,21 @@ ensure_uploads_fonts_dir() {
   fi
 
   fonts_mode="$(stat -c '%a' "$fonts_dir" 2>/dev/null || true)"
-  owner_digit="${fonts_mode:0:1}"
-  group_digit="${fonts_mode:1:1}"
-  if echo "$owner_digit" | grep -Eq '^[0-9]$' && [ "$owner_digit" -ge 2 ]; then
-    writable="yes"
-  elif echo "$group_digit" | grep -Eq '^[0-9]$' && [ "$group_digit" -ge 2 ]; then
-    writable="yes"
-  fi
-
-  if [ "$writable" = "yes" ]; then
-    log_info "fonts 目录可写：${fonts_dir}"
+  if [ "$fonts_mode" = "755" ]; then
+    log_info "fonts 目录权限已设置为 755。"
   else
-    log_warn "fonts 目录不可写：${fonts_dir}（权限 ${fonts_mode:-unknown}）"
+    log_warn "fonts 目录权限非 755（当前 ${fonts_mode:-unknown}）。"
   fi
 }
 
 ensure_wp_indexing_policy() {
   # [ANCHOR:WP_INDEXING_POLICY]
   local choice policy_value
+
+  if wp_installation_skipped; then
+    log_warn "已选择浏览器完成安装，跳过搜索引擎索引策略设置。"
+    return
+  fi
 
   if ! command -v wp >/dev/null 2>&1; then
     log_warn "未找到 wp-cli，跳过搜索引擎索引策略设置。"
@@ -6093,6 +6378,11 @@ ensure_wp_permalink_structure() {
   # [ANCHOR:WP_PERMALINKS]
   local structure="/%postname%/"
 
+  if wp_installation_skipped; then
+    log_warn "已选择浏览器完成安装，跳过固定链接设置。"
+    return
+  fi
+
   if ! command -v wp >/dev/null 2>&1; then
     log_warn "未找到 wp-cli，跳过固定链接设置。"
     return
@@ -6125,6 +6415,11 @@ ensure_lscwp_page_cache_detect() {
   local wp_config wp_content advanced_cache plugin_dir source_cache
   local owner_group wp_content_perm
   local lscwp_ready="no"
+
+  if wp_installation_skipped; then
+    log_warn "已选择浏览器完成安装，跳过 Page Cache 检测辅助。"
+    return
+  fi
 
   if [ -z "${DOC_ROOT:-}" ] || [ ! -d "$DOC_ROOT" ]; then
     log_warn "未找到站点目录，跳过 Page Cache 检测辅助。"
@@ -6326,6 +6621,11 @@ resolve_default_theme_slug() {
 
 ensure_default_theme_policy() {
   # [ANCHOR:WP_DEFAULT_THEME_POLICY]
+  if wp_installation_skipped; then
+    log_warn "已选择浏览器完成安装，跳过默认主题设置。"
+    return
+  fi
+
   if ! command -v wp >/dev/null 2>&1; then
     log_warn "未找到 wp-cli，跳过默认主题设置。"
     return
@@ -6665,6 +6965,7 @@ ensure_wp_core_installed() {
   fi
 
   if wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
+    WP_INSTALL_SKIPPED=0
     return 0
   fi
 
@@ -6675,7 +6976,7 @@ ensure_wp_core_installed() {
   fi
 
   if [ -t 0 ] && [ -t 1 ]; then
-    read -rp "使用 wp-cli 初始化 WordPress？[Y/n] " choice
+    read -rp "跳过 CLI 安装，改用浏览器完成 WordPress 安装？（推荐）[Y/n] " choice
     choice="${choice:-Y}"
   else
     choice="Y"
@@ -6683,10 +6984,12 @@ ensure_wp_core_installed() {
 
   case "$choice" in
     [Nn]*)
-      log_warn "已跳过 WordPress 初始化，WP baseline 将延后至安装完成后。"
-      return 1
+      WP_INSTALL_SKIPPED=0
       ;;
     *)
+      WP_INSTALL_SKIPPED=1
+      log_warn "已选择浏览器完成 WordPress 安装，后续 WP baseline 将延后。"
+      return 0
       ;;
   esac
 
@@ -6715,6 +7018,7 @@ ensure_wp_core_installed() {
     --admin_user="$admin_user" \
     --admin_password="$admin_pass" \
     --admin_email="$admin_email" >/dev/null 2>&1; then
+    WP_INSTALL_SKIPPED=0
     log_info "WordPress 已初始化完成。"
     log_info "管理员账号: ${admin_user}"
     log_info "管理员密码: ${admin_pass}"
@@ -7262,6 +7566,11 @@ ensure_wp_loopback_and_rest_health() {
   local wp_json_code ajax_code
   local curl_exit=0
 
+  if wp_installation_skipped; then
+    log_info "Skipping REST/loopback check: WordPress install skipped."
+    return
+  fi
+
   if ! command -v wp >/dev/null 2>&1; then
     log_warn "未找到 wp-cli，跳过 REST/loopback 检查。"
     return
@@ -7601,7 +7910,9 @@ run_loopback_preflight() {
   if [ -f "${doc_root}/wp-config.php" ] || [ -f "${doc_root}/wp-settings.php" ]; then
     echo
     echo "4) WordPress REST API 回环检查"
-    if command -v wp >/dev/null 2>&1; then
+    if wp_installation_skipped; then
+      log_info "Skipping REST/loopback check: WordPress install skipped."
+    elif command -v wp >/dev/null 2>&1; then
       if ! wp_cli_base core is-installed --skip-plugins --skip-themes >/dev/null 2>&1; then
         log_info "Skipping REST/loopback check: WordPress not installed yet."
       elif command -v curl >/dev/null 2>&1; then
@@ -7693,6 +8004,8 @@ fix_permissions() {
   chown -R nobody:nogroup "$base"
   find "$base" -type d -exec chmod 755 {} +
   find "$base" -type f -exec chmod 644 {} +
+
+  ensure_uploads_fonts_dir
 
   log_info "已将 ${base} 目录及文件权限统一为 nobody:nogroup + 755/644。"
 }
@@ -7972,6 +8285,11 @@ print_summary() {
   echo "  2) 确认云厂商安全组和本机防火墙均已放行 80/443;"
   echo "  3) 再在 CDN / 加速服务后台开启代理（橙云）和 HTTPS。"
   echo "  4) 如未自动初始化 WordPress，请访问 http://${SITE_DOMAIN}/wp-admin/install.php 完成站点初始化。"
+  if [ "${WP_INSTALL_SKIPPED:-0}" -eq 1 ]; then
+    echo
+    echo "下一步：访问 http(s)://${SITE_DOMAIN} 在浏览器完成 WordPress 安装。"
+    echo "完成后可运行 Smart Optimize 进行推荐优化。"
+  fi
   echo
 
   print_https_post_install "${SITE_DOMAIN}"
@@ -8059,7 +8377,7 @@ install_frontend_only_flow() {
   else
     WP_INSTALL_RESULT=1
   fi
-  if [ "$WP_INSTALL_RESULT" -eq 0 ]; then
+  if [ "$WP_INSTALL_RESULT" -eq 0 ] && [ "${WP_INSTALL_SKIPPED:-0}" -eq 0 ]; then
     apply_wp_lomp_baseline
     wp_slim_post_install
     log_step "WordPress REST/loopback 自检"
@@ -8149,7 +8467,7 @@ install_standard_flow() {
   else
     WP_INSTALL_RESULT=1
   fi
-  if [ "$WP_INSTALL_RESULT" -eq 0 ]; then
+  if [ "$WP_INSTALL_RESULT" -eq 0 ] && [ "${WP_INSTALL_SKIPPED:-0}" -eq 0 ]; then
     apply_wp_lomp_baseline
     wp_slim_post_install
     log_step "WordPress REST/loopback 自检"
@@ -8457,7 +8775,7 @@ install_hub_flow() {
   else
     WP_INSTALL_RESULT=1
   fi
-  if [ "$WP_INSTALL_RESULT" -eq 0 ]; then
+  if [ "$WP_INSTALL_RESULT" -eq 0 ] && [ "${WP_INSTALL_SKIPPED:-0}" -eq 0 ]; then
     apply_wp_lomp_baseline
     wp_slim_post_install
     log_step "WordPress REST/loopback 自检"
