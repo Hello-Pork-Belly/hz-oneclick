@@ -4,6 +4,52 @@ This document describes the Optimize security hardening tasks added to the
 WordPress installer flow. The UI is bilingual (EN/ZH), but the guidance below
 is in English only.
 
+## 运维与安全中心（Ops & Security Center）
+
+### 概览：运维与安全中心是什么
+
+运维与安全中心是一个「后置优化」菜单入口，用于集中管理安全加固、备份、告警与健康监控。它不改变安装流程本身，而是把常用的运维硬化能力集中到一个菜单里，便于在已有服务器上按需启用。
+
+### Fail2Ban 防御部署
+
+Fail2Ban 用于防御 SSH 与 WordPress 登录/接口的暴力破解，通过分析日志并自动封禁异常 IP。
+
+1) 运行 `hz.sh` → Optimize → 运维与安全中心 → Fail2Ban。
+2) 安装完成后可执行 `fail2ban-client status` 查看状态与已启用 jail。
+
+### Postfix 邮件告警配置（Null Client）
+
+Postfix Relay 仅负责发送邮件，不接收外部来信（Null Client）。
+
+1) 准备好 SMTP 账号（Brevo/Gmail 等）。
+2) 运行 `hz.sh` → Optimize → 运维与安全中心 → Postfix 邮件告警配置。
+3) 使用脚本内的发送测试，或在服务器上执行 `echo "test" | mail -s "hz test" your@email` 验证收件情况。
+
+### Rclone 备份策略
+
+1) 先完成 `rclone config` 并确保 remote 可用。
+2) 运行 `hz.sh` → Optimize → 运维与安全中心 → Rclone 备份。
+3) 备份内容包括数据库导出与网站文件打包。
+4) 保留策略：数据库保留 14 天；文件备份保留最近 14 份。
+5) 日志路径：`/var/log/hz-backup.log`。
+
+### HealthCheck 健康检查
+
+遵循 “Silence is Golden” 原则：只有异常才发送告警邮件。
+
+1) 运行 `hz.sh` → Optimize → 运维与安全中心 → HealthCheck 健康检查。
+2) 监控项包括磁盘空间、Docker 运行状态、可选的 Tailscale 状态与负载情况。
+3) 可通过 `crontab -l | grep hz-healthcheck.sh` 确认定时任务是否生效，并留意告警邮件。
+
+### 常见问题（FAQ）
+
+- **为什么没有收到邮件？**  
+  检查 Postfix Relay 配置是否成功、SMTP 账号是否可用，以及邮件是否进入垃圾箱。
+- **rclone remote 找不到？**  
+  先运行 `rclone config` 创建 remote，再回到运维与安全中心执行备份模块。
+- **Fail2Ban 不封禁？**  
+  确认 jail 已启用且日志路径可读，再查看 `fail2ban-client status` 的监控结果。
+
 ## Where the Optimize tasks live and how to run them
 
 * Source: `modules/wp/install-ols-wp-standard.sh`.

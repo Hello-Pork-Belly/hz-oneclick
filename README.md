@@ -13,6 +13,27 @@ HorizonTech 的一键安装脚本合集。
 - 把共用步骤（比如 rclone、Docker、基础优化）做成可复用模块  
 - 方便读者 fork 后根据自己的环境修改
 
+## Features
+
+- 🛡️ 运维与安全中心 (Ops & Security Center)
+  - Fail2Ban：保护 SSH + WordPress 登录/接口免受暴力破解（基于日志自动封禁）。
+  - Postfix Relay：邮件告警发送（Null Client / 仅发送，通过 Brevo/Gmail 等 SMTP 中继）。
+  - Rclone Backup：每日备份（数据库 + 网站文件）同步到云端（Google Drive/OneDrive 等，取决于你的 rclone remote）。
+  - HealthCheck：每日健康检查（“Silence is Golden”：只有异常才发邮件）。
+
+## Quick Start (Public)
+
+安装器负责搭建基础环境；运维中心负责安全/备份/告警/监控。你也可以在已有服务器上独立运行这些模块，无需完整走一遍安装流程。
+
+## Version / Changelog / Release Notes
+
+- v2.2.0 (2025-01-02)
+  - New Ops & Security Center menu
+  - New security layer (Fail2Ban)
+  - New notification layer (Postfix relay)
+  - New backup layer (Rclone backup job)
+  - New observability layer (daily healthcheck alerts)
+
 示例目标（规划中）：
 
 - Immich 部署到 VPS
@@ -33,6 +54,8 @@ bash <(curl -fsSL https://sh.horizontech.eu.org)
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Hello-Pork-Belly/hz-oneclick/main/hz.sh)
 ```
+
+安装后可在 Optimize → 运维与安全中心 中启用 Fail2Ban / 邮件告警 / 备份 / 健康检查。
 
 ## 贡献与提交流程
 

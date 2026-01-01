@@ -26,7 +26,7 @@ BASELINE_TRIAGE_LIB="${REPO_ROOT}/lib/baseline_triage.sh"
 cd /
 
 # install-lomp-lnmp-standard.sh
-# Version: v1.0.0-rc.2
+# Version: v2.2.0
 # Date: 2025-01-02
 # 更新记录:
 # - v2.2:
