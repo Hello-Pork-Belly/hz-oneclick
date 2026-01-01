@@ -7,9 +7,7 @@ if [[ "$SCRIPT_SOURCE" != /* ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
-if [ -z "${REPO_ROOT:-}" ]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-fi
+: "${REPO_ROOT:=$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 COMMON_LIB="${REPO_ROOT}/lib/common.sh"
 OPS_MENU_LIB="${REPO_ROOT}/lib/ops_menu_lib.sh"
 # [ANCHOR:CH20_BASELINE_SOURCE]
@@ -71,10 +69,7 @@ LSPHP_TUNING_STATUS="pending"
 : "${INSTALL_MODE:=full}"
 : "${WP_INSTALL_SKIPPED:=0}"
 
-if [ -r "$COMMON_LIB" ]; then
-  # shellcheck source=/dev/null
-  . "$COMMON_LIB"
-fi
+source "${REPO_ROOT}/lib/common.sh" 2>/dev/null || true
 
 if [ -r "$OPS_MENU_LIB" ]; then
   # shellcheck source=/dev/null

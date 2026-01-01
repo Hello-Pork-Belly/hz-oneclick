@@ -12,6 +12,8 @@ HZ_ONECLICK_VERSION="v2.2.0"
 HZ_ONECLICK_BUILD="2026-01-01"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+source "${REPO_ROOT}/lib/common.sh" 2>/dev/null || true
+
 if [ -r "${REPO_ROOT}/lib/ops_menu_lib.sh" ]; then
   # shellcheck source=/dev/null
   . "${REPO_ROOT}/lib/ops_menu_lib.sh"

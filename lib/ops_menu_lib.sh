@@ -1,12 +1,29 @@
 #!/usr/bin/env bash
 
-ops_require_repo_root() {
-  if [ -z "${REPO_ROOT:-}" ]; then
-    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
-  fi
+: "${REPO_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-  if [ -z "${REPO_ROOT:-}" ] || [ ! -d "${REPO_ROOT}/modules" ]; then
-    echo "[ERROR] 无法定位仓库根目录或 modules 目录不存在。"
+if [[ ! -d "${REPO_ROOT}/modules" || ! -d "${REPO_ROOT}/lib" ]]; then
+  echo "[ERROR] REPO_ROOT invalid: ${REPO_ROOT}"
+  return 1
+fi
+
+if ! declare -F log_ok >/dev/null 2>&1; then
+  if [ -r "${REPO_ROOT}/lib/common.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/lib/common.sh"
+  fi
+fi
+
+if ! declare -F log_ok >/dev/null 2>&1; then
+  log_info() { echo "[INFO] $*"; }
+  log_ok() { echo "[OK] $*"; }
+  log_warn() { echo "[WARN] $*"; }
+  log_err() { echo "[ERROR] $*"; }
+fi
+
+ops_require_repo_root() {
+  if [[ ! -d "${REPO_ROOT}/modules" || ! -d "${REPO_ROOT}/lib" ]]; then
+    log_err "REPO_ROOT invalid: ${REPO_ROOT}"
     return 1
   fi
 
@@ -126,13 +143,13 @@ show_ops_menu() {
     esac
 
     if [ ! -f "$module_path" ]; then
-      echo "[WARN] 模块脚本不存在：${module_path}"
+      log_warn "模块脚本不存在：${module_path}"
       ops_pause
       continue
     fi
 
     if ! bash "$module_path"; then
-      echo "[WARN] 模块执行失败，请检查日志后重试。"
+      log_warn "模块执行失败，请检查日志后重试。"
     fi
     ops_pause
   done
