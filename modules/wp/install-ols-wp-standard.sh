@@ -29,6 +29,8 @@ cd /
 # Version: v1.0.0-rc.2
 # Date: 2025-01-02
 # 更新记录:
+# - v2.2:
+#   - 新增安全加固中心菜单，集成 Fail2Ban 模块入口（Baseline v2.2.0）。
 # - v0.9:
 #   - 完成"彻底移除本机 OLS""按 slug 清理站点"后，不再直接退出脚本，
 #     而是提示已完成并返回「清理本机 OLS / WordPress」菜单。
@@ -488,6 +490,29 @@ is_openlitespeed_active() {
   return 1
 }
 
+has_systemctl() {
+  command -v systemctl >/dev/null 2>&1
+}
+
+is_fail2ban_active() {
+  if has_systemctl; then
+    systemctl is-active --quiet fail2ban
+    return $?
+  fi
+
+  if command -v service >/dev/null 2>&1; then
+    if service fail2ban status >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if pgrep -x fail2ban-server >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return 1
+}
+
 optimize_finish_menu() {
   local lang choice
   lang="$(get_finish_lang)"
@@ -530,6 +555,57 @@ optimize_finish_menu() {
         exit 0
         ;;
       0)
+        exit 0
+        ;;
+      *)
+        if [ "$lang" = "en" ]; then
+          echo "Invalid choice, please try again."
+        else
+          echo "无效选项，请重试。"
+        fi
+        ;;
+    esac
+  done
+}
+
+security_finish_menu() {
+  local lang choice
+  lang="$(get_finish_lang)"
+
+  if [ ! -t 0 ]; then
+    return 0
+  fi
+
+  while true; do
+    echo
+    if [ "$lang" = "en" ]; then
+      echo "=== Security Complete ==="
+      echo "  1) Return to Security menu"
+      echo "  2) Return to Optimize menu"
+      echo "  0) Return to main menu / Exit"
+      read -rp "Choose [0-2]: " choice
+    else
+      echo "=== Security 完成 ==="
+      echo "  1) 返回安全加固中心"
+      echo "  2) 返回 Optimize 菜单"
+      echo "  0) 返回主菜单 / 退出"
+      read -rp "请输入选项 [0-2]: " choice
+    fi
+
+    case "$choice" in
+      1)
+        show_security_menu
+        return
+        ;;
+      2)
+        show_optimize_menu
+        return
+        ;;
+      0)
+        if is_menu_context; then
+          show_main_menu
+          return
+        fi
         exit 0
         ;;
       *)
@@ -2955,6 +3031,78 @@ show_optimize_advanced_menu() {
   done
 }
 
+show_security_menu() {
+  local lang choice fail2ban_label fail2ban_path
+  lang="$(get_finish_lang)"
+  fail2ban_path="${REPO_ROOT}/modules/security/install-fail2ban.sh"
+
+  while true; do
+    echo
+    if is_fail2ban_active; then
+      if [ "$lang" = "en" ]; then
+        fail2ban_label="Fail2Ban Deploy [active]"
+      else
+        fail2ban_label="Fail2Ban 防御部署 [已启用]"
+      fi
+    else
+      if [ "$lang" = "en" ]; then
+        fail2ban_label="Fail2Ban Deploy [inactive]"
+      else
+        fail2ban_label="Fail2Ban 防御部署 [未启用]"
+      fi
+    fi
+
+    if [ "$lang" = "en" ]; then
+      echo "=== Security Hardening Center ==="
+      echo "  1) ${fail2ban_label}"
+      echo "  2) (Coming soon) Rkhunter intrusion detection"
+      echo "  3) (Coming soon) Postfix alerting"
+      echo "  0) Back"
+      read -rp "Choose [0-3]: " choice
+    else
+      echo "=== 安全加固中心 ==="
+      echo "  1) ${fail2ban_label}"
+      echo "  2) (Coming soon) Rkhunter 入侵检测"
+      echo "  3) (Coming soon) Postfix 邮件告警"
+      echo "  0) 🔙 返回上一级"
+      read -rp "请输入选项 [0-3]: " choice
+    fi
+
+    case "$choice" in
+      1)
+        if [ ! -f "$fail2ban_path" ]; then
+          log_error "缺少 Fail2Ban 安装脚本：${fail2ban_path}"
+          continue
+        fi
+        if ! bash "$fail2ban_path"; then
+          log_error "Fail2Ban 模块执行失败，请检查日志后重试。"
+          continue
+        fi
+        security_finish_menu
+        return 0
+        ;;
+      2|3)
+        if [ "$lang" = "en" ]; then
+          log_warn "Module not ready yet."
+        else
+          log_warn "模块暂未开放，敬请期待。"
+        fi
+        ;;
+      0)
+        show_optimize_menu
+        return 0
+        ;;
+      *)
+        if [ "$lang" = "en" ]; then
+          echo "Invalid choice, please try again."
+        else
+          echo "无效选项，请重试。"
+        fi
+        ;;
+    esac
+  done
+}
+
 show_optimize_menu() {
   local lang choice
   lang="$(get_finish_lang)"
@@ -2973,16 +3121,18 @@ show_optimize_menu() {
     echo
     if [ "$lang" = "en" ]; then
       echo "=== Optimize Menu ==="
-      echo "  1) 🚀 Smart Optimize (Recommended)"
-      echo "  2) Advanced / Manual Selection"
-      echo "  0) Back / Exit"
-      read -rp "Choose [0-2]: " choice
+      echo "  1) 🚀 Smart Optimize Wizard"
+      echo "  2) 🛡️ Security Hardening Center"
+      echo "  3) Advanced / Manual Selection"
+      echo "  0) Back"
+      read -rp "Choose [0-3]: " choice
     else
       echo "=== Optimize 菜单 ==="
-      echo "  1) 🚀 Smart Optimize（推荐）"
-      echo "  2) 高级 / 手动选择"
-      echo "  0) 返回 / 退出"
-      read -rp "请输入选项 [0-2]: " choice
+      echo "  1) 🚀 智能优化向导"
+      echo "  2) 🛡️ 安全加固中心"
+      echo "  3) 🔧 高级/手动选择"
+      echo "  0) 🔙 返回主菜单"
+      read -rp "请输入选项 [0-3]: " choice
     fi
 
     case "$choice" in
@@ -2995,6 +3145,9 @@ show_optimize_menu() {
         return 1
         ;;
       2)
+        show_security_menu
+        ;;
+      3)
         show_optimize_advanced_menu
         ;;
       0)
