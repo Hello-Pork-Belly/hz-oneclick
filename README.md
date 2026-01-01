@@ -15,11 +15,12 @@ HorizonTech 的一键安装脚本合集。
 
 ## Features
 
-- 🛡️ 运维与安全中心 (Ops & Security Center)
-  - Fail2Ban：保护 SSH + WordPress 登录/接口免受暴力破解（基于日志自动封禁）。
-  - Postfix Relay：邮件告警发送（Null Client / 仅发送，通过 Brevo/Gmail 等 SMTP 中继）。
-  - Rclone Backup：每日备份（数据库 + 网站文件）同步到云端（Google Drive/OneDrive 等，取决于你的 rclone remote）。
-  - HealthCheck：每日健康检查（“Silence is Golden”：只有异常才发邮件）。
+### 🛡️ Ops & Security Center (v2.2.0)
+
+- Fail2Ban：SSH & WordPress 暴力破解防护
+- Postfix Relay：仅发送（Null Client）SMTP 中继告警邮件
+- Rclone Backup：每日数据库 + 文件备份到云端
+- HealthCheck：每日健康检查（仅异常时邮件告警）
 
 ## Quick Start (Public)
 
@@ -27,7 +28,7 @@ HorizonTech 的一键安装脚本合集。
 
 ## Version / Changelog / Release Notes
 
-- v2.2.1 (2026-01-01)
+- v2.2.0 (2026-01-01)
   - Fixed Fail2Ban performance issues and config conflicts.
   - New Ops & Security Center menu
   - New security layer (Fail2Ban)

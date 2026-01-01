@@ -26,7 +26,7 @@ BASELINE_TRIAGE_LIB="${REPO_ROOT}/lib/baseline_triage.sh"
 cd /
 
 # install-lomp-lnmp-standard.sh
-# Version: v2.2.1
+# Version: v2.2.0
 # Date: 2026-01-01
 # 更新记录:
 # - v2.2:
@@ -520,15 +520,15 @@ get_fail2ban_status_tag() {
       return 0
     fi
   fi
-  echo "[未配置]"
+  echo ""
 }
 
 get_postfix_relay_status_tag() {
-  if [ -f /etc/postfix/sasl_passwd ] && [ -f /etc/postfix/sasl_passwd.db ]; then
+  if [ -f /etc/postfix/sasl_passwd ]; then
     echo "[已配置]"
     return 0
   fi
-  echo "[未配置]"
+  echo ""
 }
 
 root_crontab_has_entry() {
@@ -580,7 +580,7 @@ get_rclone_backup_status_tag() {
     return 0
   fi
 
-  echo "[未配置]"
+  echo ""
 }
 
 get_healthcheck_status_tag() {
@@ -594,7 +594,7 @@ get_healthcheck_status_tag() {
     return 0
   fi
 
-  echo "[未配置]"
+  echo ""
 }
 
 optimize_finish_menu() {
@@ -3117,7 +3117,23 @@ show_optimize_advanced_menu() {
 
 show_ops_menu() {
   local choice repo_root fail2ban_path postfix_path rclone_path healthcheck_path
-  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  local module_path
+  repo_root=""
+  if [ -n "${REPO_ROOT:-}" ] && [ -d "${REPO_ROOT}" ]; then
+    repo_root="${REPO_ROOT}"
+  else
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
+  fi
+  if [ -z "$repo_root" ] || [ ! -d "$repo_root" ]; then
+    if [ -d /opt/hz-oneclick ]; then
+      repo_root="/opt/hz-oneclick"
+    else
+      echo "[WARN] 未检测到本地仓库路径，无法调用模块脚本。请使用仓库方式运行或确保 \${REPO_ROOT} 指向 hz-oneclick 根目录。"
+      read -rp "按回车返回 Optimize 菜单..." choice
+      show_optimize_menu
+      return 0
+    fi
+  fi
   fail2ban_path="${repo_root}/modules/security/install-fail2ban.sh"
   postfix_path="${repo_root}/modules/mail/setup-postfix-relay.sh"
   rclone_path="${repo_root}/modules/backup/setup-backup-rclone.sh"
@@ -3135,40 +3151,52 @@ show_ops_menu() {
 
     case "$choice" in
       1)
-        if [ ! -f "$fail2ban_path" ]; then
-          echo "[ERROR] 未找到模块脚本：${fail2ban_path}"
+        module_path="$fail2ban_path"
+        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
+          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
+          read -rp "按回车返回运维中心..." choice
           continue
         fi
-        if ! bash "$fail2ban_path"; then
+        if ! bash "$module_path"; then
           log_error "Fail2Ban 模块执行失败，请检查日志后重试。"
         fi
+        read -rp "按回车返回运维中心..." choice
         ;;
       2)
-        if [ ! -f "$postfix_path" ]; then
-          echo "[ERROR] 未找到模块脚本：${postfix_path}"
+        module_path="$postfix_path"
+        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
+          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
+          read -rp "按回车返回运维中心..." choice
           continue
         fi
-        if ! bash "$postfix_path"; then
+        if ! bash "$module_path"; then
           log_error "Postfix 模块执行失败，请检查日志后重试。"
         fi
+        read -rp "按回车返回运维中心..." choice
         ;;
       3)
-        if [ ! -f "$rclone_path" ]; then
-          echo "[ERROR] 未找到模块脚本：${rclone_path}"
+        module_path="$rclone_path"
+        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
+          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
+          read -rp "按回车返回运维中心..." choice
           continue
         fi
-        if ! bash "$rclone_path"; then
+        if ! bash "$module_path"; then
           log_error "Rclone 备份模块执行失败，请检查日志后重试。"
         fi
+        read -rp "按回车返回运维中心..." choice
         ;;
       4)
-        if [ ! -f "$healthcheck_path" ]; then
-          echo "[ERROR] 未找到模块脚本：${healthcheck_path}"
+        module_path="$healthcheck_path"
+        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
+          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
+          read -rp "按回车返回运维中心..." choice
           continue
         fi
-        if ! bash "$healthcheck_path"; then
+        if ! bash "$module_path"; then
           log_error "HealthCheck 模块执行失败，请检查日志后重试。"
         fi
+        read -rp "按回车返回运维中心..." choice
         ;;
       0)
         show_optimize_menu
@@ -3212,7 +3240,7 @@ show_optimize_menu() {
     else
       echo "=== Optimize 菜单 ==="
       echo "  1) 🚀 智能优化向导"
-      echo "  2) 🛡️ 运维与安全中心 (Ops & Security Center)"
+      echo "  2) 🛡️ 运维与安全中心"
       echo "  3) 🔧 高级/手动选择"
       echo "  0) 🔙 返回主菜单"
       read -rp "请输入选项 [0-3]: " choice
@@ -3234,11 +3262,8 @@ show_optimize_menu() {
         show_optimize_advanced_menu
         ;;
       0)
-        if is_menu_context; then
-          show_main_menu
-          return
-        fi
-        exit 0
+        show_main_menu
+        return
         ;;
       *)
         if [ "$lang" = "en" ]; then
