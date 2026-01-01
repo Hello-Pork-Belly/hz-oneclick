@@ -184,6 +184,32 @@ check_load() {
   fi
 }
 
+check_fail2ban() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet fail2ban; then
+      return 0
+    fi
+    if systemctl list-unit-files --type=service 2>/dev/null | grep -q '^fail2ban\.service'; then
+      set_status "FAILURE"
+      add_detail "Fail2Ban not running"
+    else
+      set_status "WARNING"
+      add_detail "Fail2Ban not installed"
+    fi
+    return 0
+  fi
+  if command -v fail2ban-client >/dev/null 2>&1; then
+    if fail2ban-client ping >/dev/null 2>&1; then
+      return 0
+    fi
+    set_status "FAILURE"
+    add_detail "Fail2Ban not running"
+    return 0
+  fi
+  set_status "WARNING"
+  add_detail "Fail2Ban not installed"
+}
+
 send_alert() {
   if [[ -z "$ADMIN_EMAIL" ]]; then
     log_line "未设置 ADMIN_EMAIL，无法发送邮件。"
@@ -221,6 +247,7 @@ main() {
   check_docker
   check_tailscale
   check_load
+  check_fail2ban
 
   if [[ "$STATUS" == "OK" ]]; then
     log_line "OK"

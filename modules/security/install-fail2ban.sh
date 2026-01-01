@@ -194,6 +194,7 @@ bantime = 1h
 findtime = 10m
 maxretry = 3
 banaction = ${banaction}
+action = ${banaction}
 backend = ${backend}
 ignoreip = 127.0.0.1/8 ::1
 

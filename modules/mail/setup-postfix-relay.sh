@@ -87,7 +87,7 @@ install_postfix_packages() {
   export DEBIAN_FRONTEND=noninteractive
   local mailname
   mailname="$(hostname -f 2>/dev/null || hostname)"
-  echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections
+  echo "postfix postfix/main_mailer_type select Satellite system" | debconf-set-selections
   echo "postfix postfix/mailname string ${mailname}" | debconf-set-selections
   apt-get update -y
   apt-get install -y postfix libsasl2-modules mailutils ca-certificates
@@ -123,6 +123,28 @@ prompt_port() {
     fi
     log_warn "端口必须是数字，请重试。"
   done
+}
+
+prompt_with_default() {
+  local prompt="$1"
+  local default_value="$2"
+  local var
+  read -r -p "${prompt} [${default_value}]: " var
+  var="${var:-${default_value}}"
+  echo "${var}"
+}
+
+prompt_hidden_required() {
+  local prompt="$1"
+  local var=""
+  while [ -z "${var}" ]; do
+    read -r -s -p "${prompt}" var
+    echo
+    if [ -z "${var}" ]; then
+      log_warn "输入不能为空，请重试。"
+    fi
+  done
+  echo "${var}"
 }
 
 set_kv() {
@@ -276,18 +298,50 @@ main() {
   fi
 
   log_info "== configure =="
-  local relay_host relay_port smtp_user smtp_pass sender_email default_recipient
-  relay_host="$(prompt_required "中继主机（如 smtp-relay.brevo.com）: ")"
-  relay_port="$(prompt_port 587)"
-  smtp_user="$(prompt_required "SMTP 用户名: ")"
-  read -r -s -p "SMTP 密码（不回显）: " smtp_pass
-  echo
-  while [ -z "${smtp_pass}" ]; do
-    log_warn "密码不能为空，请重新输入。"
-    read -r -s -p "SMTP 密码（不回显）: " smtp_pass
-    echo
+  local relay_host relay_port smtp_user smtp_pass sender_email default_recipient provider_choice login_email
+  while true; do
+    echo "请选择 SMTP 服务商："
+    echo "  1) Gmail (smtp.gmail.com:587)"
+    echo "  2) Brevo (smtp-relay.brevo.com:587)"
+    echo "  3) 自定义"
+    echo "  0) 退出"
+    read -r -p "请输入选项 [0-3]: " provider_choice
+    case "${provider_choice}" in
+      1)
+        relay_host="smtp.gmail.com"
+        relay_port="587"
+        smtp_user="$(prompt_required "Gmail 地址（也是用户名）: ")"
+        smtp_pass="$(prompt_hidden_required "Gmail 应用专用密码（不回显）: ")"
+        sender_email="$(prompt_with_default "发信邮箱（From）" "${smtp_user}")"
+        break
+        ;;
+      2)
+        relay_host="smtp-relay.brevo.com"
+        relay_port="587"
+        login_email="$(prompt_required "Brevo 登录邮箱: ")"
+        smtp_pass="$(prompt_hidden_required "Brevo API Key（不回显）: ")"
+        smtp_user="$(prompt_with_default "SMTP 用户名" "apikey")"
+        sender_email="$(prompt_with_default "发信邮箱（From）" "${login_email}")"
+        break
+        ;;
+      3)
+        relay_host="$(prompt_required "中继主机（如 smtp.example.com）: ")"
+        relay_port="$(prompt_port 587)"
+        smtp_user="$(prompt_required "SMTP 用户名: ")"
+        smtp_pass="$(prompt_hidden_required "SMTP 密码（不回显）: ")"
+        sender_email="$(prompt_required "发信邮箱（From）: ")"
+        break
+        ;;
+      0)
+        log_warn "用户取消，退出。"
+        exit 1
+        ;;
+      *)
+        log_warn "无效选项，请重试。"
+        ;;
+    esac
   done
-  sender_email="$(prompt_required "发信邮箱（From）: ")"
+
   read -r -p "默认测试收件人（可留空）: " default_recipient
 
   log_info "配置摘要："

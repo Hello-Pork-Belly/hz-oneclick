@@ -61,28 +61,47 @@ if ! rclone version >/dev/null 2>&1; then
   die "rclone 安装失败或不可用。"
 fi
 
-rclone_config_file="$(rclone config file 2>/dev/null | awk -F': ' '/Configuration file is/ {print $2}')"
-if [[ -z "${rclone_config_file}" ]]; then
-  rclone_config_file="/root/.config/rclone/rclone.conf"
-fi
-log_info "rclone 配置文件路径: ${rclone_config_file}"
+target_dir="${HOME}/.config/rclone"
+target_file="${target_dir}/rclone.conf"
+log_info "rclone 配置文件路径: ${target_file}"
+log_info "请先在本地配置好 Rclone（Google Drive/OneDrive/Dropbox 等），然后将 rclone.conf 内容粘贴到这里。"
+log_info "粘贴完成后按 Ctrl+D 结束输入。"
 
+tmpfile="$(mktemp)"
+cat > "${tmpfile}"
+if [[ ! -s "${tmpfile}" ]]; then
+  rm -f "${tmpfile}"
+  die "未检测到任何配置内容，已取消写入。"
+fi
+
+mkdir -p "${target_dir}"
+chmod 700 "${target_dir}"
+
+timestamp="$(date '+%Y%m%d-%H%M%S')"
+if [[ -s "${target_file}" ]]; then
+  backup_file="${target_file}.bak-${timestamp}"
+  cp -a "${target_file}" "${backup_file}"
+  log_ok "已备份现有配置到 ${backup_file}"
+  {
+    printf '\n; --- HZ-ONECLICK APPENDED CONFIG %s ---\n' "${timestamp}"
+    cat "${tmpfile}"
+  } >> "${target_file}"
+else
+  cat "${tmpfile}" > "${target_file}"
+fi
+rm -f "${tmpfile}"
+chmod 600 "${target_file}"
+
+log_info "当前可用 remotes："
 mapfile -t remotes < <(rclone listremotes 2>/dev/null || true)
-if [[ ${#remotes[@]} -eq 0 ]]; then
-  log_warn "未检测到任何 Rclone remote。"
-  read -r -p "未检测到任何 Rclone remote。是否现在进入交互配置 (rclone config)？[Y/n] " answer
-  answer="${answer:-Y}"
-  if [[ "${answer}" =~ ^[Yy]$ ]]; then
-    rclone config
-  fi
-  mapfile -t remotes < <(rclone listremotes 2>/dev/null || true)
-  if [[ ${#remotes[@]} -eq 0 ]]; then
-    log_warn "仍未配置任何 remote。后续备份将无法同步到远端。"
-    read -r -p "是否继续安装？继续将导致备份同步失败。[y/N] " continue_answer
-    continue_answer="${continue_answer:-N}"
-    if [[ ! "${continue_answer}" =~ ^[Yy]$ ]]; then
-      die "用户取消。请先配置 rclone remote。"
-    fi
+if [[ ${#remotes[@]} -gt 0 ]]; then
+  printf '%s\n' "${remotes[@]}"
+else
+  log_warn "未检测到任何 Rclone remote，请确认配置内容。"
+  read -r -p "是否继续安装？继续将导致备份同步失败。[y/N] " continue_answer
+  continue_answer="${continue_answer:-N}"
+  if [[ ! "${continue_answer}" =~ ^[Yy]$ ]]; then
+    die "用户取消。请先配置 rclone remote。"
   fi
 fi
 
