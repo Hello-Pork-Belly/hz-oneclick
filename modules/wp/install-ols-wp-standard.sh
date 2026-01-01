@@ -575,8 +575,8 @@ get_healthcheck_status_tag() {
 }
 
 get_rkhunter_status_tag() {
-  if [ -f /etc/default/rkhunter ] || [ -f /etc/rkhunter.conf ]; then
-    echo "[已配置]"
+  if [ -f /etc/cron.d/rkhunter ] || [ -f /etc/default/rkhunter ]; then
+    echo "[已计划]"
   else
     echo "[未配置]"
   fi
@@ -3101,7 +3101,7 @@ show_optimize_advanced_menu() {
 }
 
 show_ops_menu() {
-  local choice repo_root fail2ban_path postfix_path rclone_path healthcheck_path
+  local choice repo_root fail2ban_path postfix_path rclone_path healthcheck_path rkhunter_path
   local module_path
   repo_root=""
   if [ -n "${REPO_ROOT:-}" ] && [ -d "${REPO_ROOT}" ]; then
@@ -3123,6 +3123,7 @@ show_ops_menu() {
   postfix_path="${repo_root}/modules/mail/setup-postfix-relay.sh"
   rclone_path="${repo_root}/modules/backup/setup-backup-rclone.sh"
   healthcheck_path="${repo_root}/modules/monitor/setup-healthcheck.sh"
+  rkhunter_path="${repo_root}/modules/security/install-rkhunter.sh"
 
   while true; do
     echo
@@ -3185,8 +3186,16 @@ show_ops_menu() {
         read -rp "按回车返回运维中心..." choice
         ;;
       5)
-        echo "[INFO] Rkhunter 模块暂未上线（Coming soon）"
-        read -rp "按回车返回运维中心..." choice
+        module_path="$rkhunter_path"
+        if [ -f "$module_path" ] && [ -r "$module_path" ]; then
+          if ! bash "$module_path"; then
+            log_error "Rkhunter 模块执行失败，请检查日志后重试。"
+          fi
+          read -rp "按回车返回运维中心..." choice
+        else
+          echo "[INFO] Rkhunter 模块尚未集成（Coming soon），请等待后续版本。"
+          read -rp "按回车返回运维中心..." choice
+        fi
         ;;
       0)
         show_optimize_menu

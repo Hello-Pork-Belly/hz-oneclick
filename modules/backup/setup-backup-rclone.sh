@@ -61,48 +61,74 @@ if ! rclone version >/dev/null 2>&1; then
   die "rclone 安装失败或不可用。"
 fi
 
-target_dir="${HOME}/.config/rclone"
-target_file="${target_dir}/rclone.conf"
-log_info "rclone 配置文件路径: ${target_file}"
-log_info "请先在本地配置好 Rclone（Google Drive/OneDrive/Dropbox 等），然后将 rclone.conf 内容粘贴到这里。"
-log_info "粘贴完成后按 Ctrl+D 结束输入。"
+cfg_dir="${HOME}/.config/rclone"
+cfg_file="${cfg_dir}/rclone.conf"
 
-tmpfile="$(mktemp)"
-cat > "${tmpfile}"
-if [[ ! -s "${tmpfile}" ]]; then
-  rm -f "${tmpfile}"
-  die "未检测到任何配置内容，已取消写入。"
-fi
+paste_rclone_config() {
+  local tmp timestamp backup_file
+  log_info "rclone 配置文件路径: ${cfg_file}"
+  log_info "推荐：在本地电脑（Win/Mac）先配置好 rclone（Google Drive/OneDrive/Dropbox），打开 rclone.conf，把内容复制粘贴到这里。"
+  log_info "请把 rclone.conf 内容粘贴到下方，按 Ctrl+D 结束输入："
 
-mkdir -p "${target_dir}"
-chmod 700 "${target_dir}"
-
-timestamp="$(date '+%Y%m%d-%H%M%S')"
-if [[ -s "${target_file}" ]]; then
-  backup_file="${target_file}.bak-${timestamp}"
-  cp -a "${target_file}" "${backup_file}"
-  log_ok "已备份现有配置到 ${backup_file}"
-  {
-    printf '\n; --- HZ-ONECLICK APPENDED CONFIG %s ---\n' "${timestamp}"
-    cat "${tmpfile}"
-  } >> "${target_file}"
-else
-  cat "${tmpfile}" > "${target_file}"
-fi
-rm -f "${tmpfile}"
-chmod 600 "${target_file}"
-
-log_info "当前可用 remotes："
-mapfile -t remotes < <(rclone listremotes 2>/dev/null || true)
-if [[ ${#remotes[@]} -gt 0 ]]; then
-  printf '%s\n' "${remotes[@]}"
-else
-  log_warn "未检测到任何 Rclone remote，请确认配置内容。"
-  read -r -p "是否继续安装？继续将导致备份同步失败。[y/N] " continue_answer
-  continue_answer="${continue_answer:-N}"
-  if [[ ! "${continue_answer}" =~ ^[Yy]$ ]]; then
-    die "用户取消。请先配置 rclone remote。"
+  tmp="$(mktemp)"
+  cat > "${tmp}"
+  if [[ ! -s "${tmp}" ]]; then
+    rm -f "${tmp}"
+    log_warn "未检测到任何输入，已取消写入。请完成后重试。"
+    return 1
   fi
+
+  mkdir -p "${cfg_dir}"
+  chmod 700 "${cfg_dir}"
+
+  timestamp="$(date '+%Y%m%d-%H%M%S')"
+  if [[ -s "${cfg_file}" ]]; then
+    backup_file="${cfg_file}.bak-${timestamp}"
+    cp -a "${cfg_file}" "${backup_file}"
+    log_ok "已备份现有配置到 ${backup_file}"
+    {
+      printf '\n; --- HZ-ONECLICK APPENDED CONFIG %s ---\n' "${timestamp}"
+      cat "${tmp}"
+    } >> "${cfg_file}"
+  else
+    cat "${tmp}" > "${cfg_file}"
+  fi
+  rm -f "${tmp}"
+  chmod 600 "${cfg_file}"
+  return 0
+}
+
+if [[ ! -s "${cfg_file}" ]]; then
+  if ! paste_rclone_config; then
+    exit 1
+  fi
+fi
+
+remotes=()
+for attempt in 1 2; do
+  log_info "当前可用 remotes："
+  mapfile -t remotes < <(rclone listremotes 2>/dev/null || true)
+  if [[ ${#remotes[@]} -gt 0 ]]; then
+    printf '%s\n' "${remotes[@]}"
+    break
+  fi
+  log_warn "未检测到 Remote，请检查粘贴的配置是否完整。"
+  if [[ "${attempt}" -eq 2 ]]; then
+    break
+  fi
+  read -r -p "是否重新粘贴配置？[y/N] " retry_answer
+  retry_answer="${retry_answer:-N}"
+  if [[ "${retry_answer}" =~ ^[Yy]$ ]]; then
+    if ! paste_rclone_config; then
+      exit 1
+    fi
+  else
+    break
+  fi
+done
+
+if [[ ${#remotes[@]} -eq 0 ]]; then
+  die "未检测到 Remote，请检查粘贴的配置是否完整。"
 fi
 
 remote_name=""
