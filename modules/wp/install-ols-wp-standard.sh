@@ -494,107 +494,92 @@ has_systemctl() {
   command -v systemctl >/dev/null 2>&1
 }
 
-is_fail2ban_active() {
-  if has_systemctl; then
-    systemctl is-active --quiet fail2ban
+is_service_active() {
+  local service_name="$1"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet "$service_name" >/dev/null 2>&1
     return $?
   fi
 
   if command -v service >/dev/null 2>&1; then
-    if service fail2ban status >/dev/null 2>&1; then
+    if service "$service_name" status >/dev/null 2>&1; then
       return 0
     fi
   fi
 
-  if pgrep -x fail2ban-server >/dev/null 2>&1; then
+  if pgrep -x "${service_name}-server" >/dev/null 2>&1; then
     return 0
   fi
 
   return 1
 }
 
-get_fail2ban_status_tag() {
-  if command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet fail2ban >/dev/null 2>&1; then
-      echo "[已启用]"
-      return 0
-    fi
-  fi
-  echo ""
-}
-
-get_postfix_relay_status_tag() {
-  if [ -f /etc/postfix/sasl_passwd ]; then
-    echo "[已配置]"
+file_exists_nonempty() {
+  local file_path="$1"
+  if [ -s "$file_path" ]; then
     return 0
   fi
-  echo ""
-}
-
-root_crontab_has_entry() {
-  local pattern="$1"
-
-  if ! command -v crontab >/dev/null 2>&1; then
-    return 1
-  fi
-
-  if crontab -l -u root 2>/dev/null | grep -q -- "$pattern"; then
-    return 0
-  fi
-
   return 1
 }
 
-cron_files_have_entry() {
+cron_has() {
   local pattern="$1"
-  local cron_path
+  local cron_file
 
-  for cron_path in /etc/cron.*; do
-    if [ -d "$cron_path" ]; then
-      if grep -R -q -- "$pattern" "$cron_path" 2>/dev/null; then
-        return 0
-      fi
-    elif [ -f "$cron_path" ]; then
-      if grep -q -- "$pattern" "$cron_path" 2>/dev/null; then
-        return 0
-      fi
+  if command -v crontab >/dev/null 2>&1; then
+    if (crontab -l 2>/dev/null || true) | grep -q -- "$pattern"; then
+      return 0
+    fi
+  fi
+
+  for cron_file in /etc/cron.d/*; do
+    if [ -f "$cron_file" ] && grep -q -- "$pattern" "$cron_file" 2>/dev/null; then
+      return 0
     fi
   done
 
   return 1
 }
 
+get_fail2ban_status_tag() {
+  if is_service_active "fail2ban"; then
+    echo "[已启用]"
+  else
+    echo "[未启用]"
+  fi
+}
+
+get_postfix_relay_status_tag() {
+  if file_exists_nonempty "/etc/postfix/sasl_passwd"; then
+    echo "[已配置]"
+  else
+    echo "[未配置]"
+  fi
+}
+
 get_rclone_backup_status_tag() {
-  if root_crontab_has_entry "/usr/local/bin/hz-backup.sh"; then
+  if [ -f /etc/cron.d/hz-backup ] || cron_has "hz-backup.sh"; then
     echo "[已计划]"
-    return 0
+  else
+    echo "[未计划]"
   fi
-
-  if cron_files_have_entry "hz-backup.sh"; then
-    echo "[已计划]"
-    return 0
-  fi
-
-  if [ -f /etc/cron.d/hz-backup ]; then
-    echo "[已计划]"
-    return 0
-  fi
-
-  echo ""
 }
 
 get_healthcheck_status_tag() {
-  if root_crontab_has_entry "/usr/local/bin/hz-healthcheck.sh"; then
+  if [ -f /etc/cron.d/hz-healthcheck ] || cron_has "hz-healthcheck.sh"; then
     echo "[已计划]"
-    return 0
+  else
+    echo "[未计划]"
   fi
+}
 
-  if cron_files_have_entry "hz-healthcheck.sh"; then
-    echo "[已计划]"
-    return 0
+get_rkhunter_status_tag() {
+  if [ -f /etc/default/rkhunter ] || [ -f /etc/rkhunter.conf ]; then
+    echo "[已配置]"
+  else
+    echo "[未配置]"
   fi
-
-  echo ""
 }
 
 optimize_finish_menu() {
@@ -3146,8 +3131,9 @@ show_ops_menu() {
     echo "  2) Postfix 邮件告警配置 $(get_postfix_relay_status_tag)"
     echo "  3) Rclone 备份策略 $(get_rclone_backup_status_tag)"
     echo "  4) HealthCheck 健康检查 $(get_healthcheck_status_tag)"
+    echo "  5) Rkhunter 入侵检测 $(get_rkhunter_status_tag)"
     echo "  0) 🔙 返回上一级"
-    read -rp "请输入选项 [0-4]: " choice
+    read -rp "请输入选项 [0-5]: " choice
 
     case "$choice" in
       1)
@@ -3196,6 +3182,10 @@ show_ops_menu() {
         if ! bash "$module_path"; then
           log_error "HealthCheck 模块执行失败，请检查日志后重试。"
         fi
+        read -rp "按回车返回运维中心..." choice
+        ;;
+      5)
+        echo "[INFO] Rkhunter 模块暂未上线（Coming soon）"
         read -rp "按回车返回运维中心..." choice
         ;;
       0)
