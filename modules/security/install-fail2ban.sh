@@ -1,74 +1,316 @@
 #!/usr/bin/env bash
-#
-# install-fail2ban.sh - 安装并配置基础 fail2ban（SSH 防爆破）
-# 适用：Debian/Ubuntu（APT 系）
-#
-
 set -euo pipefail
 
-echo "==== Fail2ban 安装向导 (hz-oneclick) ===="
+log_info() {
+  echo "[INFO] $*"
+}
 
-if [[ $EUID -ne 0 ]]; then
-  echo "请使用 root 用户运行本脚本。" >&2
-  exit 1
-fi
+log_warn() {
+  echo "[WARN] $*" >&2
+}
 
-if ! command -v apt-get >/dev/null 2>&1; then
-  echo "当前系统不是基于 APT 的 Debian/Ubuntu，暂不支持一键安装。" >&2
-  exit 1
-fi
+log_error() {
+  echo "[ERROR] $*" >&2
+}
 
-# Step 1: 安装 fail2ban
-if command -v fail2ban-client >/dev/null 2>&1; then
-  echo "[Step 1/3] 检测到系统已安装 fail2ban，跳过安装。"
-else
-  echo "[Step 1/3] 安装 fail2ban..."
-  apt-get update -y
-  apt-get install -y fail2ban
-fi
+require_root() {
+  if [[ ${EUID} -ne 0 ]]; then
+    log_error "Please run this script as root."
+    exit 1
+  fi
+}
 
-# Step 2: 写入基础 jail 配置
-CONF_DIR="/etc/fail2ban/jail.d"
-CONF_FILE="${CONF_DIR}/hz-basic.conf"
+detect_package_manager() {
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    echo "yum"
+  else
+    echo ""
+  fi
+}
 
-echo "[Step 2/3] 写入基础配置到 ${CONF_FILE} ..."
-mkdir -p "$CONF_DIR"
+install_fail2ban() {
+  local pm
+  pm=$(detect_package_manager)
 
-if [[ -f "$CONF_FILE" ]]; then
-  cp "$CONF_FILE" "${CONF_FILE}.$(date +%Y%m%d%H%M%S).bak"
-  echo "已备份原有配置到 ${CONF_FILE}.$(date +%Y%m%d%H%M%S).bak"
-fi
+  if [[ -z "${pm}" ]]; then
+    log_error "No supported package manager found (apt-get/dnf/yum)."
+    exit 1
+  fi
 
-cat > "$CONF_FILE" <<'EOF'
-# hz-oneclick: 基础 fail2ban 配置（可按需修改）
+  if command -v fail2ban-client >/dev/null 2>&1; then
+    log_info "fail2ban already installed. Skipping installation."
+    return
+  fi
 
-[DEFAULT]
-# 可自行按需调整这些参数
-bantime  = 1h
-findtime = 10m
-maxretry = 5
-backend  = systemd
+  log_info "Installing fail2ban using ${pm}..."
+  case "${pm}" in
+    apt-get)
+      apt-get update -y
+      apt-get install -y fail2ban
+      ;;
+    dnf)
+      dnf install -y fail2ban
+      ;;
+    yum)
+      yum install -y fail2ban
+      ;;
+    *)
+      log_error "Unsupported package manager: ${pm}"
+      exit 1
+      ;;
+  esac
+}
 
-# 基本 SSH 防爆破：如果 22 端口对公网关闭，则影响不大
-[sshd]
-enabled  = true
-port     = ssh
-logpath  = %(sshd_log)s
-maxretry = 5
+enable_fail2ban_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    log_info "Enabling and starting fail2ban service."
+    systemctl enable --now fail2ban
+  elif command -v service >/dev/null 2>&1; then
+    log_info "Starting fail2ban service via service command."
+    service fail2ban start
+  else
+    log_warn "No service manager detected; cannot enable fail2ban automatically."
+  fi
+}
+
+restart_fail2ban_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    log_info "Restarting fail2ban service."
+    systemctl restart fail2ban
+  elif command -v service >/dev/null 2>&1; then
+    log_info "Restarting fail2ban service via service command."
+    service fail2ban restart
+  else
+    log_warn "No service manager detected; cannot restart fail2ban automatically."
+  fi
+}
+
+is_systemd_backend() {
+  if [[ -d /run/systemd/system ]]; then
+    echo "systemd"
+  else
+    echo "auto"
+  fi
+}
+
+detect_banaction() {
+  if command -v nft >/dev/null 2>&1; then
+    echo "nftables-multiport"
+  else
+    echo "iptables-multiport"
+  fi
+}
+
+OLS_LOGS_FOUND=false
+
+detect_ols_access_logs() {
+  local logs=()
+  local path
+  local found=false
+
+  if [[ -r /usr/local/lsws/logs/access.log ]]; then
+    logs+=("/usr/local/lsws/logs/access.log")
+    found=true
+  fi
+
+  if [[ "${found}" == false ]]; then
+    while IFS= read -r path; do
+      if [[ -r "${path}" ]]; then
+        logs+=("${path}")
+      fi
+    done < <(find /var/www -maxdepth 4 -type f -name "access.log" 2>/dev/null)
+
+    while IFS= read -r path; do
+      if [[ -r "${path}" ]]; then
+        logs+=("${path}")
+      fi
+    done < <(find /usr/local/lsws -maxdepth 6 -type f -name "access.log" 2>/dev/null)
+  fi
+
+  declare -A seen=()
+  local filtered=()
+  local count=0
+  local non_empty=()
+  local readable=()
+
+  for path in "${logs[@]}"; do
+    if [[ -n "${path}" && -z "${seen["${path}"]+x}" ]]; then
+      seen["${path}"]=1
+      if [[ -s "${path}" ]]; then
+        non_empty+=("${path}")
+      else
+        readable+=("${path}")
+      fi
+    fi
+  done
+
+  if [[ ${#non_empty[@]} -gt 0 ]]; then
+    for path in "${non_empty[@]}"; do
+      filtered+=("${path}")
+      count=$((count + 1))
+      if [[ ${count} -ge 5 ]]; then
+        break
+      fi
+    done
+  fi
+
+  if [[ ${#filtered[@]} -lt 5 && ${#readable[@]} -gt 0 ]]; then
+    for path in "${readable[@]}"; do
+      filtered+=("${path}")
+      count=$((count + 1))
+      if [[ ${count} -ge 5 ]]; then
+        break
+      fi
+    done
+  fi
+
+  if [[ ${#filtered[@]} -gt 0 ]]; then
+    OLS_LOGS_FOUND=true
+  else
+    log_warn "No readable OLS access logs detected. Falling back to /usr/local/lsws/logs/access.log."
+    filtered+=("/usr/local/lsws/logs/access.log")
+  fi
+
+  printf '%s\n' "${filtered[@]}"
+}
+
+write_wordpress_filter() {
+  local filter_dir="/etc/fail2ban/filter.d"
+  local filter_file="${filter_dir}/wordpress-hard.conf"
+
+  log_info "Writing WordPress hard filter to ${filter_file}."
+  mkdir -p "${filter_dir}"
+  cat > "${filter_file}" <<'EOF'
+[Definition]
+failregex = ^<HOST>\s+\S+\s+\S+\s+\[[^\]]+\]\s+"POST\s+/(wp-login\.php|xmlrpc\.php)(\?[^\s"]*)?\s+HTTP/[^\"]+"\s+\d{3}\s+
+ignoreregex =
 EOF
+}
 
-# Step 3: 启动并设置开机自启
-echo "[Step 3/3] 启动并设为开机自启..."
-systemctl enable --now fail2ban
+write_jail_local() {
+  local jail_local="/etc/fail2ban/jail.local"
+  local marker_begin="# HZ-ONECLICK FAIL2BAN BEGIN"
+  local marker_end="# HZ-ONECLICK FAIL2BAN END"
+  local tmp_file
+  local timestamp
+  local banaction
+  local backend
+  local logpaths
+  local logpath_lines=""
 
-echo
-echo "==== 完成：fail2ban 已安装并启用基础 SSH 防护 ===="
-echo "常用检查命令："
-echo "  fail2ban-client status"
-echo "  fail2ban-client status sshd"
-echo
-echo "如需为 OLS / Nginx / 其它服务添加 jail，可编辑："
-echo "  /etc/fail2ban/jail.d/hz-basic.conf"
-echo
-echo "提示：如果你本身关闭了公网 22 端口，fail2ban 主要是作为额外保险，"
-echo "      是否继续使用取决于实际场景。"
+  timestamp=$(date +%Y%m%d%H%M%S)
+  banaction=$(detect_banaction)
+  backend=$(is_systemd_backend)
+
+  if [[ -f "${jail_local}" ]]; then
+    cp "${jail_local}" "${jail_local}.${timestamp}.bak"
+    log_info "Backed up existing jail.local to ${jail_local}.${timestamp}.bak"
+  fi
+
+  logpaths=$(detect_ols_access_logs)
+  while IFS= read -r path; do
+    if [[ -n "${path}" ]]; then
+      logpath_lines+="logpath = ${path}"$'\n'
+    fi
+  done <<< "${logpaths}"
+
+  tmp_file=$(mktemp)
+  if [[ -f "${jail_local}" ]]; then
+    awk -v begin="${marker_begin}" -v end="${marker_end}" '
+      $0 == begin {inblock=1; next}
+      $0 == end {inblock=0; next}
+      !inblock {print}
+    ' "${jail_local}" > "${tmp_file}"
+  fi
+
+  {
+    if [[ -s "${tmp_file}" ]]; then
+      cat "${tmp_file}"
+      echo
+    fi
+    cat <<EOF
+${marker_begin}
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 3
+banaction = ${banaction}
+backend = ${backend}
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+maxretry = 3
+bantime = 1h
+findtime = 10m
+
+[wordpress-hard]
+enabled = true
+port = http,https
+filter = wordpress-hard
+maxretry = 5
+findtime = 10m
+bantime = 1h
+${logpath_lines}${marker_end}
+EOF
+  } > "${jail_local}"
+
+  rm -f "${tmp_file}"
+}
+
+print_status() {
+  log_info "fail2ban-client ping:"
+  if fail2ban-client ping; then
+    :
+  else
+    log_warn "fail2ban-client ping failed."
+  fi
+
+  log_info "fail2ban-client status:"
+  if fail2ban-client status; then
+    :
+  else
+    log_warn "fail2ban-client status failed."
+  fi
+
+  log_info "fail2ban-client status sshd:"
+  if fail2ban-client status sshd; then
+    :
+  else
+    log_warn "sshd jail status not available."
+  fi
+
+  log_info "fail2ban-client status wordpress-hard:"
+  if fail2ban-client status wordpress-hard; then
+    :
+  else
+    log_warn "wordpress-hard jail status not available."
+  fi
+}
+
+main() {
+  require_root
+
+  install_fail2ban
+  enable_fail2ban_service
+  write_wordpress_filter
+  write_jail_local
+  restart_fail2ban_service
+
+  log_info "Detected OLS access logs:"
+  detect_ols_access_logs | sed 's/^/  - /'
+
+  if [[ "${OLS_LOGS_FOUND}" == false ]]; then
+    log_warn "wordpress-hard jail enabled but no readable OLS access log found. Please verify OLS access log path and rerun."
+  fi
+
+  print_status
+}
+
+main "$@"
