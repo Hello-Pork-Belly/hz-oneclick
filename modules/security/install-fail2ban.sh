@@ -106,76 +106,69 @@ detect_banaction() {
 }
 
 OLS_LOGS_FOUND=false
+OLS_LOG_SELECTED=""
 
 detect_ols_access_logs() {
-  local logs=()
+  local primary_log="/usr/local/lsws/logs/access.log"
+  local -a vhost_candidates=()
+  local -a www_candidates=()
+  local -a all_candidates=()
   local path
-  local found=false
+  local selected=""
 
-  if [[ -r /usr/local/lsws/logs/access.log ]]; then
-    logs+=("/usr/local/lsws/logs/access.log")
-    found=true
+  if [[ -r "${primary_log}" ]]; then
+    all_candidates+=("${primary_log}")
   fi
 
-  if [[ "${found}" == false ]]; then
-    while IFS= read -r path; do
-      if [[ -r "${path}" ]]; then
-        logs+=("${path}")
-      fi
-    done < <(find /var/www -maxdepth 4 -type f -name "access.log" 2>/dev/null)
-
-    while IFS= read -r path; do
-      if [[ -r "${path}" ]]; then
-        logs+=("${path}")
-      fi
-    done < <(find /usr/local/lsws -maxdepth 6 -type f -name "access.log" 2>/dev/null)
-  fi
-
-  declare -A seen=()
-  local filtered=()
-  local count=0
-  local non_empty=()
-  local readable=()
-
-  for path in "${logs[@]}"; do
-    if [[ -n "${path}" && -z "${seen["${path}"]+x}" ]]; then
-      seen["${path}"]=1
-      if [[ -s "${path}" ]]; then
-        non_empty+=("${path}")
-      else
-        readable+=("${path}")
-      fi
+  for path in /usr/local/lsws/conf/vhosts/*/logs/access.log; do
+    if [[ -r "${path}" ]]; then
+      vhost_candidates+=("${path}")
     fi
   done
 
-  if [[ ${#non_empty[@]} -gt 0 ]]; then
-    for path in "${non_empty[@]}"; do
-      filtered+=("${path}")
-      count=$((count + 1))
-      if [[ ${count} -ge 5 ]]; then
-        break
-      fi
-    done
+  for path in /var/www/*/logs/access.log; do
+    if [[ -r "${path}" ]]; then
+      www_candidates+=("${path}")
+    fi
+  done
+
+  if [[ ${#vhost_candidates[@]} -gt 0 ]]; then
+    mapfile -t vhost_candidates < <(printf '%s\n' "${vhost_candidates[@]}" | sort)
+    all_candidates+=("${vhost_candidates[@]}")
   fi
 
-  if [[ ${#filtered[@]} -lt 5 && ${#readable[@]} -gt 0 ]]; then
-    for path in "${readable[@]}"; do
-      filtered+=("${path}")
-      count=$((count + 1))
-      if [[ ${count} -ge 5 ]]; then
-        break
-      fi
-    done
+  if [[ ${#www_candidates[@]} -gt 0 ]]; then
+    mapfile -t www_candidates < <(printf '%s\n' "${www_candidates[@]}" | sort)
+    all_candidates+=("${www_candidates[@]}")
   fi
 
-  if [[ ${#filtered[@]} -gt 0 ]]; then
+  if [[ -r "${primary_log}" && -s "${primary_log}" ]]; then
+    selected="${primary_log}"
+  elif [[ ${#vhost_candidates[@]} -gt 0 ]]; then
+    selected="${vhost_candidates[0]}"
+  elif [[ ${#www_candidates[@]} -gt 0 ]]; then
+    selected="${www_candidates[0]}"
+  fi
+
+  if [[ -n "${selected}" ]]; then
     OLS_LOGS_FOUND=true
-  else
-    log_warn "No readable OLS access logs detected. Falling back to /usr/local/lsws/logs/access.log."
-    filtered+=("/usr/local/lsws/logs/access.log")
+    OLS_LOG_SELECTED="${selected}"
+    if [[ ${#all_candidates[@]} -gt 1 ]]; then
+      log_info "Detected OLS access log candidates:"
+      for path in "${all_candidates[@]}"; do
+        log_info "  - ${path}"
+      done
+    fi
+    log_info "Selected OLS access log: ${selected}"
+    printf '%s\n' "${selected}"
+    return 0
   fi
 
-  printf '%s\n' "${filtered[@]}"
+  OLS_LOGS_FOUND=false
+  OLS_LOG_SELECTED=""
+  log_warn "OLS access log could not be auto-detected using standard paths."
+  log_warn "Edit /etc/fail2ban/jail.d/99-hz-oneclick.local and set wordpress-hard logpath=... manually."
+  return 1
 }
 
 write_wordpress_filter() {
@@ -191,49 +184,32 @@ ignoreregex =
 EOF
 }
 
-write_jail_local() {
-  local jail_local="/etc/fail2ban/jail.local"
-  local marker_begin="# HZ-ONECLICK FAIL2BAN BEGIN"
-  local marker_end="# HZ-ONECLICK FAIL2BAN END"
-  local tmp_file
-  local timestamp
+write_hz_jail_overlay() {
+  local jail_dir="/etc/fail2ban/jail.d"
+  local jail_overlay="${jail_dir}/99-hz-oneclick.local"
   local banaction
   local backend
-  local logpaths
-  local logpath_lines=""
+  local logpath=""
+  local wordpress_enabled="false"
+  local wordpress_logpath_line="# logpath = /path/to/ols/access.log"
+  local wordpress_note="# NOTE: set logpath and enabled=true to activate wordpress-hard jail."
 
-  timestamp=$(date +%Y%m%d%H%M%S)
   banaction=$(detect_banaction)
   backend=$(is_systemd_backend)
 
-  if [[ -f "${jail_local}" ]]; then
-    cp "${jail_local}" "${jail_local}.${timestamp}.bak"
-    log_info "Backed up existing jail.local to ${jail_local}.${timestamp}.bak"
+  if detect_ols_access_logs; then
+    logpath="${OLS_LOG_SELECTED}"
   fi
 
-  logpaths=$(detect_ols_access_logs)
-  while IFS= read -r path; do
-    if [[ -n "${path}" ]]; then
-      logpath_lines+="logpath = ${path}"$'\n'
-    fi
-  done <<< "${logpaths}"
-
-  tmp_file=$(mktemp)
-  if [[ -f "${jail_local}" ]]; then
-    awk -v begin="${marker_begin}" -v end="${marker_end}" '
-      $0 == begin {inblock=1; next}
-      $0 == end {inblock=0; next}
-      !inblock {print}
-    ' "${jail_local}" > "${tmp_file}"
+  if [[ -n "${logpath}" ]]; then
+    wordpress_enabled="true"
+    wordpress_logpath_line="logpath = ${logpath}"
+    wordpress_note=""
   fi
 
-  {
-    if [[ -s "${tmp_file}" ]]; then
-      cat "${tmp_file}"
-      echo
-    fi
-    cat <<EOF
-${marker_begin}
+  log_info "Writing fail2ban overlay to ${jail_overlay}."
+  mkdir -p "${jail_dir}"
+  cat > "${jail_overlay}" <<EOF
 [DEFAULT]
 bantime = 1h
 findtime = 10m
@@ -251,17 +227,15 @@ bantime = 1h
 findtime = 10m
 
 [wordpress-hard]
-enabled = true
+enabled = ${wordpress_enabled}
 port = http,https
 filter = wordpress-hard
 maxretry = 5
 findtime = 10m
 bantime = 1h
-${logpath_lines}${marker_end}
+${wordpress_note}
+${wordpress_logpath_line}
 EOF
-  } > "${jail_local}"
-
-  rm -f "${tmp_file}"
 }
 
 print_status() {
@@ -300,14 +274,14 @@ main() {
   install_fail2ban
   enable_fail2ban_service
   write_wordpress_filter
-  write_jail_local
-  restart_fail2ban_service
+  write_hz_jail_overlay
 
-  log_info "Detected OLS access logs:"
-  detect_ols_access_logs | sed 's/^/  - /'
-
-  if [[ "${OLS_LOGS_FOUND}" == false ]]; then
-    log_warn "wordpress-hard jail enabled but no readable OLS access log found. Please verify OLS access log path and rerun."
+  log_info "Reloading fail2ban configuration."
+  if fail2ban-client reload; then
+    :
+  else
+    log_warn "fail2ban-client reload failed; restarting service."
+    restart_fail2ban_service
   fi
 
   print_status

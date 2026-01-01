@@ -27,7 +27,7 @@ HorizonTech 的一键安装脚本合集。
 
 ## Version / Changelog / Release Notes
 
-- v2.2.0 (2025-01-02)
+- v2.2.1 (2026-01-01)
   - New Ops & Security Center menu
   - New security layer (Fail2Ban)
   - New notification layer (Postfix relay)

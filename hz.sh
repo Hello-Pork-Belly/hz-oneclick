@@ -8,8 +8,8 @@ yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 log_info() { printf '[INFO] %s\n' "$*"; }
 log_warn() { printf '[WARN] %s\n' "$*" >&2; }
 
-HZ_ONECLICK_VERSION="v2.2.0"
-HZ_ONECLICK_BUILD="2025-12-27"
+HZ_ONECLICK_VERSION="v2.2.1"
+HZ_ONECLICK_BUILD="2026-01-01"
 
 # 全局语言变量：en / zh
 HZ_LANG=""

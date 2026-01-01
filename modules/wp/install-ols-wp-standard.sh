@@ -26,8 +26,8 @@ BASELINE_TRIAGE_LIB="${REPO_ROOT}/lib/baseline_triage.sh"
 cd /
 
 # install-lomp-lnmp-standard.sh
-# Version: v2.2.0
-# Date: 2025-01-02
+# Version: v2.2.1
+# Date: 2026-01-01
 # 更新记录:
 # - v2.2:
 #   - 新增安全加固中心菜单，集成 Fail2Ban 模块入口（Baseline v2.2.0）。
