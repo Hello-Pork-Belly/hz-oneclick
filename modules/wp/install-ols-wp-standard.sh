@@ -7,8 +7,11 @@ if [[ "$SCRIPT_SOURCE" != /* ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [ -z "${REPO_ROOT:-}" ]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+fi
 COMMON_LIB="${REPO_ROOT}/lib/common.sh"
+OPS_MENU_LIB="${REPO_ROOT}/lib/ops_menu_lib.sh"
 # [ANCHOR:CH20_BASELINE_SOURCE]
 BASELINE_LIB="${REPO_ROOT}/lib/baseline.sh"
 BASELINE_HTTPS_LIB="${REPO_ROOT}/lib/baseline_https.sh"
@@ -71,6 +74,13 @@ LSPHP_TUNING_STATUS="pending"
 if [ -r "$COMMON_LIB" ]; then
   # shellcheck source=/dev/null
   . "$COMMON_LIB"
+fi
+
+if [ -r "$OPS_MENU_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$OPS_MENU_LIB"
+else
+  echo "[WARN] 运维中心模块库未找到，运维与安全中心菜单不可用。"
 fi
 
 if [ -r "$BASELINE_LIB" ]; then
@@ -492,94 +502,6 @@ is_openlitespeed_active() {
 
 has_systemctl() {
   command -v systemctl >/dev/null 2>&1
-}
-
-is_service_active() {
-  local service_name="$1"
-
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl is-active --quiet "$service_name" >/dev/null 2>&1
-    return $?
-  fi
-
-  if command -v service >/dev/null 2>&1; then
-    if service "$service_name" status >/dev/null 2>&1; then
-      return 0
-    fi
-  fi
-
-  if pgrep -x "${service_name}-server" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  return 1
-}
-
-file_exists_nonempty() {
-  local file_path="$1"
-  if [ -s "$file_path" ]; then
-    return 0
-  fi
-  return 1
-}
-
-cron_has() {
-  local pattern="$1"
-  local cron_file
-
-  if command -v crontab >/dev/null 2>&1; then
-    if (crontab -l 2>/dev/null || true) | grep -q -- "$pattern"; then
-      return 0
-    fi
-  fi
-
-  for cron_file in /etc/cron.d/*; do
-    if [ -f "$cron_file" ] && grep -q -- "$pattern" "$cron_file" 2>/dev/null; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-get_fail2ban_status_tag() {
-  if is_service_active "fail2ban"; then
-    echo "[已启用]"
-  else
-    echo "[未启用]"
-  fi
-}
-
-get_postfix_relay_status_tag() {
-  if file_exists_nonempty "/etc/postfix/sasl_passwd"; then
-    echo "[已配置]"
-  else
-    echo "[未配置]"
-  fi
-}
-
-get_rclone_backup_status_tag() {
-  if [ -f /etc/cron.d/hz-backup ] || cron_has "hz-backup.sh"; then
-    echo "[已计划]"
-  else
-    echo "[未计划]"
-  fi
-}
-
-get_healthcheck_status_tag() {
-  if [ -f /etc/cron.d/hz-healthcheck ] || cron_has "hz-healthcheck.sh"; then
-    echo "[已计划]"
-  else
-    echo "[未计划]"
-  fi
-}
-
-get_rkhunter_status_tag() {
-  if [ -f /etc/cron.d/rkhunter ] || [ -f /etc/default/rkhunter ]; then
-    echo "[已计划]"
-  else
-    echo "[未配置]"
-  fi
 }
 
 optimize_finish_menu() {
@@ -3100,114 +3022,6 @@ show_optimize_advanced_menu() {
   done
 }
 
-show_ops_menu() {
-  local choice repo_root fail2ban_path postfix_path rclone_path healthcheck_path rkhunter_path
-  local module_path
-  repo_root=""
-  if [ -n "${REPO_ROOT:-}" ] && [ -d "${REPO_ROOT}" ]; then
-    repo_root="${REPO_ROOT}"
-  else
-    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
-  fi
-  if [ -z "$repo_root" ] || [ ! -d "$repo_root" ]; then
-    if [ -d /opt/hz-oneclick ]; then
-      repo_root="/opt/hz-oneclick"
-    else
-      echo "[WARN] 未检测到本地仓库路径，无法调用模块脚本。请使用仓库方式运行或确保 \${REPO_ROOT} 指向 hz-oneclick 根目录。"
-      read -rp "按回车返回 Optimize 菜单..." choice
-      show_optimize_menu
-      return 0
-    fi
-  fi
-  fail2ban_path="${repo_root}/modules/security/install-fail2ban.sh"
-  postfix_path="${repo_root}/modules/mail/setup-postfix-relay.sh"
-  rclone_path="${repo_root}/modules/backup/setup-backup-rclone.sh"
-  healthcheck_path="${repo_root}/modules/monitor/setup-healthcheck.sh"
-  rkhunter_path="${repo_root}/modules/security/install-rkhunter.sh"
-
-  while true; do
-    echo
-    echo "=== 运维与安全中心 ==="
-    echo "  1) Fail2Ban 防御部署 $(get_fail2ban_status_tag)"
-    echo "  2) Postfix 邮件告警配置 $(get_postfix_relay_status_tag)"
-    echo "  3) Rclone 备份策略 $(get_rclone_backup_status_tag)"
-    echo "  4) HealthCheck 健康检查 $(get_healthcheck_status_tag)"
-    echo "  5) Rkhunter 入侵检测 $(get_rkhunter_status_tag)"
-    echo "  0) 🔙 返回上一级"
-    read -rp "请输入选项 [0-5]: " choice
-
-    case "$choice" in
-      1)
-        module_path="$fail2ban_path"
-        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
-          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
-          read -rp "按回车返回运维中心..." choice
-          continue
-        fi
-        if ! bash "$module_path"; then
-          log_error "Fail2Ban 模块执行失败，请检查日志后重试。"
-        fi
-        read -rp "按回车返回运维中心..." choice
-        ;;
-      2)
-        module_path="$postfix_path"
-        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
-          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
-          read -rp "按回车返回运维中心..." choice
-          continue
-        fi
-        if ! bash "$module_path"; then
-          log_error "Postfix 模块执行失败，请检查日志后重试。"
-        fi
-        read -rp "按回车返回运维中心..." choice
-        ;;
-      3)
-        module_path="$rclone_path"
-        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
-          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
-          read -rp "按回车返回运维中心..." choice
-          continue
-        fi
-        if ! bash "$module_path"; then
-          log_error "Rclone 备份模块执行失败，请检查日志后重试。"
-        fi
-        read -rp "按回车返回运维中心..." choice
-        ;;
-      4)
-        module_path="$healthcheck_path"
-        if [ ! -f "$module_path" ] || [ ! -r "$module_path" ] || [ ! -x "$module_path" ]; then
-          echo "[WARN] ${module_path} 模块不存在，可能仓库不完整/未更新。"
-          read -rp "按回车返回运维中心..." choice
-          continue
-        fi
-        if ! bash "$module_path"; then
-          log_error "HealthCheck 模块执行失败，请检查日志后重试。"
-        fi
-        read -rp "按回车返回运维中心..." choice
-        ;;
-      5)
-        module_path="$rkhunter_path"
-        if [ -f "$module_path" ] && [ -r "$module_path" ]; then
-          if ! bash "$module_path"; then
-            log_error "Rkhunter 模块执行失败，请检查日志后重试。"
-          fi
-          read -rp "按回车返回运维中心..." choice
-        else
-          echo "[INFO] Rkhunter 模块尚未集成（Coming soon），请等待后续版本。"
-          read -rp "按回车返回运维中心..." choice
-        fi
-        ;;
-      0)
-        show_optimize_menu
-        return 0
-        ;;
-      *)
-        echo "无效选项，请重试。"
-        ;;
-    esac
-  done
-}
-
 show_security_menu() {
   show_ops_menu
   return $?
@@ -3255,7 +3069,12 @@ show_optimize_menu() {
         return 1
         ;;
       2)
-        show_ops_menu
+        if declare -F show_ops_menu >/dev/null 2>&1; then
+          show_ops_menu
+        else
+          echo "[WARN] 运维中心模块库未加载，请确认仓库完整。"
+          read -rp "按回车返回 Optimize 菜单..." _
+        fi
         ;;
       3)
         show_optimize_advanced_menu

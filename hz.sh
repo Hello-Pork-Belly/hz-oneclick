@@ -10,6 +10,14 @@ log_warn() { printf '[WARN] %s\n' "$*" >&2; }
 
 HZ_ONECLICK_VERSION="v2.2.0"
 HZ_ONECLICK_BUILD="2026-01-01"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -r "${REPO_ROOT}/lib/ops_menu_lib.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${REPO_ROOT}/lib/ops_menu_lib.sh"
+else
+  log_warn "ops_menu_lib.sh 未找到，运维中心菜单不可用。"
+fi
 
 # 全局语言变量：en / zh
 HZ_LANG=""
@@ -506,19 +514,20 @@ main_menu() {
       echo
       cyan  "Menu options"
       cyan  "  1) Immich on Cloud (VPS)"
-      green "  2) rclone basics (OneDrive etc.)"
-      cyan  "  3) Plex Media Server"
-      green "  4) Transmission (BT download)"
-      cyan  "  5) Tailscale access"
-      green "  6) Edge Tunnel / Reverse Proxy"
-      cyan  "  7) msmtp + Brevo (SMTP alert)"
-      green "  8) WP backup (DB + files)"
-      cyan  "  9) wp-cron helper (system cron for WordPress)"
-      green " 10) Verify WP baseline"
-      cyan  "  11) rkhunter (rootkit / trojan scanner)"
-      green " 12) rkhunter (daily check / optional mail alert)"
-      cyan  "  13) Baseline Diagnostics"
-      green " 14) LOMP/LNMP (DB / Redis provisioning)"
+      green "  2) 🛡️ Ops & Security Center"
+      cyan  "  3) rclone basics (OneDrive etc.)"
+      green "  4) Plex Media Server"
+      cyan  "  5) Transmission (BT download)"
+      green "  6) Tailscale access"
+      cyan  "  7) Edge Tunnel / Reverse Proxy"
+      green "  8) msmtp + Brevo (SMTP alert)"
+      cyan  "  9) WP backup (DB + files)"
+      green " 10) wp-cron helper (system cron for WordPress)"
+      cyan  " 11) Verify WP baseline"
+      green " 12) rkhunter (rootkit / trojan scanner)"
+      cyan  " 13) rkhunter (daily check / optional mail alert)"
+      green " 14) Baseline Diagnostics"
+      cyan  " 15) LOMP/LNMP (DB / Redis provisioning)"
       yellow "  0) Exit"
       green "  r) Return to language selection / 返回语言选择 "
       echo
@@ -530,56 +539,64 @@ main_menu() {
           read -rp "Press Enter to return to menu..." _
           ;;
         2)
+          if declare -F show_ops_menu >/dev/null 2>&1; then
+            show_ops_menu
+          else
+            log_warn "Ops menu library not loaded."
+            read -rp "Press Enter to return to menu..." _
+          fi
+          ;;
+        3)
           echo "Running rclone basics installer..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/rclone/install.sh")
           read -rp "Done. Press Enter to return to menu..." _
           ;;
-        3)
+        4)
           echo "Plex installer is not ready yet (coming soon)..."
           read -rp "Press Enter to return to menu..." _
           ;;
-        4)
+        5)
           echo "Transmission installer is not ready yet (coming soon)..."
           read -rp "Press Enter to return to menu..." _
           ;;
-        5)
+        6)
           echo "Tailscale helper scripts are not ready yet (coming soon)..."
           read -rp "Press Enter to return to menu..." _
           ;;
-        6)
+        7)
           echo "Edge tunnel / reverse proxy helper scripts are not ready yet (coming soon)..."
           read -rp "Press Enter to return to menu..." _
           ;;
-        7)
+        8)
           echo "Running msmtp + Brevo alert setup..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/mail/setup-msmtp-brevo.sh")
           read -rp "Done. Press Enter to return to menu..." _
           ;;
-        8)
+        9)
           echo "Running WordPress backup (DB + files) setup..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/setup-wp-backup-basic-en.sh")
           read -rp "Done. Press Enter to return to menu..." _
           ;;
-        9)
+        10)
           echo "Running wp-cron helper (system cron for WordPress)..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/gen-wp-cron-en.sh")
           ;;
-        10)
+        11)
           run_wp_baseline_verifier
           read -rp "Done. Press Enter to return to menu..." _
           ;;
-        11)
+        12)
           echo "Installing rkhunter (rootkit / trojan scanner) ..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/install-rkhunter-en.sh")
           ;;
-        12)
+        13)
           echo "rkhunter (setting / optional mail alert)) ..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron-en.sh")
           ;;
-        13)
+        14)
           baseline_diagnostics_menu
           ;;
-        14)
+        15)
           show_lomp_lnmp_profile_menu
           ;;
         0)
@@ -604,19 +621,20 @@ main_menu() {
       echo
       cyan  "菜单选项 / Menu options"
       cyan  "  1) Immich 上云（VPS）"
-      green "  2) rclone 基础安装（OneDrive 等）"
-      cyan  "  3) Plex 媒体服务器"
-      green "  4) Transmission BT 下载"
-      cyan  "  5) Tailscale 接入"
-      green "  6) 反向代理/隧道穿透"
-      cyan  "  7) 邮件报警（msmtp + Brevo）"
-      green "  8) WordPress 备份（数据库 + 文件）"
-      cyan  "  9) wp-cron 定时任务向导"
-      green "  10) 验证 WordPress 基线"
-      cyan  "  11) rkhunter（系统后门 / 木马检测）"
-      green "  12) rkhunter 定时扫描(报错邮件通知 /日志维护）"
-      cyan  "  13) 基础诊断（Baseline Diagnostics）"
-      green "  14) LOMP/LNMP（DB / Redis 配置）"
+      green "  2) 🛡️ 运维与安全中心 (Ops & Security Center)"
+      cyan  "  3) rclone 基础安装（OneDrive 等）"
+      green "  4) Plex 媒体服务器"
+      cyan  "  5) Transmission BT 下载"
+      green "  6) Tailscale 接入"
+      cyan  "  7) 反向代理/隧道穿透"
+      green "  8) 邮件报警（msmtp + Brevo）"
+      cyan  "  9) WordPress 备份（数据库 + 文件）"
+      green "  10) wp-cron 定时任务向导"
+      cyan  "  11) 验证 WordPress 基线"
+      green "  12) rkhunter（系统后门 / 木马检测）"
+      cyan  "  13) rkhunter 定时扫描(报错邮件通知 /日志维护）"
+      green "  14) 基础诊断（Baseline Diagnostics）"
+      cyan  "  15) LOMP/LNMP（DB / Redis 配置）"
       yellow "  0) 退出"
       yellow "  r) 返回语言选择 / Return to language selection"
       echo
@@ -628,56 +646,64 @@ main_menu() {
           read -rp "按回车返回菜单..." _
           ;;
         2)
+          if declare -F show_ops_menu >/dev/null 2>&1; then
+            show_ops_menu
+          else
+            log_warn "运维中心菜单未加载。"
+            read -rp "按回车返回菜单..." _
+          fi
+          ;;
+        3)
           echo "即将安装 rclone 基础模块..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/rclone/install.sh")
           read -rp "完成。按回车返回菜单..." _
           ;;
-        3)
+        4)
           echo "Plex 安装脚本暂未开放（敬请期待）..."
           read -rp "按回车返回菜单..." _
           ;;
-        4)
+        5)
           echo "Transmission 安装脚本暂未开放（敬请期待）..."
           read -rp "按回车返回菜单..." _
           ;;
-        5)
+        6)
           echo "Tailscale 辅助脚本暂未开放（敬请期待）..."
           read -rp "按回车返回菜单..." _
           ;;
-        6)
+        7)
           echo "反向代理/隧道辅助脚本暂未开放（敬请期待）..."
           read -rp "按回车返回菜单..." _
           ;;
-        7)
+        8)
           echo "即将安装 msmtp + Brevo 邮件报警模块..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/mail/setup-msmtp-brevo.sh")
           read -rp "完成。按回车返回菜单..." _
           ;;
-        8)
+        9)
           echo "即将安装 WordPress 备份模块（数据库 + 文件）..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/setup-wp-backup-basic.sh")
           read -rp "完成。按回车返回菜单..." _
           ;;
-        9)
+        10)
           echo "将运行 wp-cron 定时任务向导..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/wp/gen-wp-cron.sh")
           ;;
-        10)
+        11)
           run_wp_baseline_verifier
           read -rp "完成。按回车返回菜单..." _
           ;;
-        11)
+        12)
           echo "将安装 / 初始化 rkhunter（系统后门 / 木马检测）..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/install-rkhunter.sh")
           ;;
-        12)
+        13)
           echo "将设置 rkhunter 定时扫描（报错邮件通知 /日志维护）..."
           bash <(curl -fsSL "$HZ_INSTALL_BASE_URL/modules/security/setup-rkhunter-cron.sh")
           ;;
-        13)
+        14)
           baseline_diagnostics_menu
           ;;
-        14)
+        15)
           show_lomp_lnmp_profile_menu
           ;;
         0)
