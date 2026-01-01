@@ -301,16 +301,16 @@ main() {
   local relay_host relay_port smtp_user smtp_pass sender_email default_recipient provider_choice login_email
   while true; do
     echo "请选择 SMTP 服务商："
-    echo "  1) Gmail (smtp.gmail.com:587)"
-    echo "  2) Brevo (smtp-relay.brevo.com:587)"
-    echo "  3) 自定义"
+    echo "  1) Gmail（App Password）"
+    echo "  2) Brevo（API Key）"
+    echo "  3) 自定义（手动）"
     echo "  0) 退出"
     read -r -p "请输入选项 [0-3]: " provider_choice
     case "${provider_choice}" in
       1)
         relay_host="smtp.gmail.com"
         relay_port="587"
-        smtp_user="$(prompt_required "Gmail 地址（也是用户名）: ")"
+        smtp_user="$(prompt_required "Gmail 地址（用户名）: ")"
         smtp_pass="$(prompt_hidden_required "Gmail 应用专用密码（不回显）: ")"
         sender_email="$(prompt_with_default "发信邮箱（From）" "${smtp_user}")"
         break
@@ -318,7 +318,7 @@ main() {
       2)
         relay_host="smtp-relay.brevo.com"
         relay_port="587"
-        login_email="$(prompt_required "Brevo 登录邮箱: ")"
+        login_email="$(prompt_required "Brevo 登录邮箱（用于默认发信地址）: ")"
         smtp_pass="$(prompt_hidden_required "Brevo API Key（不回显）: ")"
         smtp_user="$(prompt_with_default "SMTP 用户名" "apikey")"
         sender_email="$(prompt_with_default "发信邮箱（From）" "${login_email}")"
