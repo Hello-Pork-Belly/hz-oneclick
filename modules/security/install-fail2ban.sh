@@ -110,65 +110,45 @@ OLS_LOG_SELECTED=""
 
 detect_ols_access_logs() {
   local primary_log="/usr/local/lsws/logs/access.log"
-  local -a vhost_candidates=()
-  local -a www_candidates=()
-  local -a all_candidates=()
   local path
   local selected=""
 
   if [[ -r "${primary_log}" ]]; then
-    all_candidates+=("${primary_log}")
-  fi
-
-  for path in /usr/local/lsws/conf/vhosts/*/logs/access.log; do
-    if [[ -r "${path}" ]]; then
-      vhost_candidates+=("${path}")
-    fi
-  done
-
-  for path in /var/www/*/logs/access.log; do
-    if [[ -r "${path}" ]]; then
-      www_candidates+=("${path}")
-    fi
-  done
-
-  if [[ ${#vhost_candidates[@]} -gt 0 ]]; then
-    mapfile -t vhost_candidates < <(printf '%s\n' "${vhost_candidates[@]}" | sort)
-    all_candidates+=("${vhost_candidates[@]}")
-  fi
-
-  if [[ ${#www_candidates[@]} -gt 0 ]]; then
-    mapfile -t www_candidates < <(printf '%s\n' "${www_candidates[@]}" | sort)
-    all_candidates+=("${www_candidates[@]}")
-  fi
-
-  if [[ -r "${primary_log}" && -s "${primary_log}" ]]; then
     selected="${primary_log}"
-  elif [[ ${#vhost_candidates[@]} -gt 0 ]]; then
-    selected="${vhost_candidates[0]}"
-  elif [[ ${#www_candidates[@]} -gt 0 ]]; then
-    selected="${www_candidates[0]}"
+  fi
+
+  if [[ -z "${selected}" ]]; then
+    for path in /usr/local/lsws/conf/vhosts/*/logs/access.log; do
+      if [[ -e "${path}" && -r "${path}" ]]; then
+        selected="${path}"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "${selected}" ]]; then
+    for path in /var/www/*/logs/access.log; do
+      if [[ -e "${path}" && -r "${path}" ]]; then
+        selected="${path}"
+        break
+      fi
+    done
   fi
 
   if [[ -n "${selected}" ]]; then
     OLS_LOGS_FOUND=true
     OLS_LOG_SELECTED="${selected}"
-    if [[ ${#all_candidates[@]} -gt 1 ]]; then
-      log_info "Detected OLS access log candidates:"
-      for path in "${all_candidates[@]}"; do
-        log_info "  - ${path}"
-      done
-    fi
     log_info "Selected OLS access log: ${selected}"
     printf '%s\n' "${selected}"
     return 0
   fi
 
   OLS_LOGS_FOUND=false
-  OLS_LOG_SELECTED=""
+  OLS_LOG_SELECTED="${primary_log}"
   log_warn "OLS access log could not be auto-detected using standard paths."
-  log_warn "Edit /etc/fail2ban/jail.d/99-hz-oneclick.local and set wordpress-hard logpath=... manually."
-  return 1
+  log_warn "Falling back to default log path: ${primary_log}"
+  printf '%s\n' "${primary_log}"
+  return 0
 }
 
 write_wordpress_filter() {
@@ -184,9 +164,8 @@ ignoreregex =
 EOF
 }
 
-write_hz_jail_overlay() {
-  local jail_dir="/etc/fail2ban/jail.d"
-  local jail_overlay="${jail_dir}/99-hz-oneclick.local"
+write_jail_local() {
+  local jail_local="/etc/fail2ban/jail.d/99-hz-oneclick.local"
   local banaction
   local backend
   local logpath=""
@@ -207,9 +186,9 @@ write_hz_jail_overlay() {
     wordpress_note=""
   fi
 
-  log_info "Writing fail2ban overlay to ${jail_overlay}."
-  mkdir -p "${jail_dir}"
-  cat > "${jail_overlay}" <<EOF
+  log_info "Writing fail2ban overlay to ${jail_local}."
+  mkdir -p "$(dirname "${jail_local}")"
+  cat > "${jail_local}" <<EOF
 [DEFAULT]
 bantime = 1h
 findtime = 10m
@@ -274,7 +253,7 @@ main() {
   install_fail2ban
   enable_fail2ban_service
   write_wordpress_filter
-  write_hz_jail_overlay
+  write_jail_local
 
   log_info "Reloading fail2ban configuration."
   if fail2ban-client reload; then
