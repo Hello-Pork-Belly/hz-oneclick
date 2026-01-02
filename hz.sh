@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=/dev/null
+source "${REPO_ROOT}/lib/common.sh"
+# shellcheck source=/dev/null
+source "${REPO_ROOT}/lib/ops_menu_lib.sh"
+
 set -euo pipefail
 
 # 颜色输出
@@ -10,14 +17,6 @@ log_warn() { printf '[WARN] %s\n' "$*" >&2; }
 
 HZ_ONECLICK_VERSION="v2.2.0"
 HZ_ONECLICK_BUILD="2026-01-01"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [ -r "${REPO_ROOT}/lib/ops_menu_lib.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/ops_menu_lib.sh"
-else
-  log_warn "ops_menu_lib.sh 未找到，运维中心菜单不可用。"
-fi
 
 # 全局语言变量：en / zh
 HZ_LANG=""
