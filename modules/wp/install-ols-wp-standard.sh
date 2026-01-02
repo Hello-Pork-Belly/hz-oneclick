@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-SCRIPT_SOURCE="${BASH_SOURCE[0]}"
-if [[ "$SCRIPT_SOURCE" != /* ]]; then
-  SCRIPT_SOURCE="$(pwd)/${SCRIPT_SOURCE}"
-fi
-
-SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
-if [ -z "${REPO_ROOT:-}" ]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-fi
+export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMMON_LIB="${REPO_ROOT}/lib/common.sh"
 OPS_MENU_LIB="${REPO_ROOT}/lib/ops_menu_lib.sh"
 # [ANCHOR:CH20_BASELINE_SOURCE]

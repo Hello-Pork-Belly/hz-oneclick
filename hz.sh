@@ -1,24 +1,14 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# --- Environment Setup ---
+export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${REPO_ROOT}/lib/common.sh"
+source "${REPO_ROOT}/lib/ops_menu_lib.sh"
+# -------------------------
 
-# 颜色输出
-cyan()   { printf '\033[36m%s\033[0m\n' "$*"; }
-green()  { printf '\033[32m%s\033[0m\n' "$*"; }
-yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
-log_info() { printf '[INFO] %s\n' "$*"; }
-log_warn() { printf '[WARN] %s\n' "$*" >&2; }
+set -euo pipefail
 
 HZ_ONECLICK_VERSION="v2.2.0"
 HZ_ONECLICK_BUILD="2026-01-01"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [ -r "${REPO_ROOT}/lib/ops_menu_lib.sh" ]; then
-  # shellcheck source=/dev/null
-  . "${REPO_ROOT}/lib/ops_menu_lib.sh"
-else
-  log_warn "ops_menu_lib.sh 未找到，运维中心菜单不可用。"
-fi
-
 # 全局语言变量：en / zh
 HZ_LANG=""
 HZ_BASELINE_FORMAT="${HZ_BASELINE_FORMAT:-text}"
@@ -54,7 +44,7 @@ baseline_menu_normalize_lang() {
 run_wp_baseline_verifier() {
   local site_slug default_doc_root doc_root_input doc_root verifier
 
-  log_info "Verify WordPress baseline"
+  echo "[INFO] Verify WordPress baseline"
   read -rp "Site slug (optional, used for default /var/www/<slug>/html): " site_slug
   if [ -n "$site_slug" ]; then
     default_doc_root="/var/www/${site_slug}/html"
@@ -65,18 +55,18 @@ run_wp_baseline_verifier() {
   doc_root="${doc_root_input:-$default_doc_root}"
 
   if [ -z "$doc_root" ]; then
-    log_warn "DOC_ROOT is required."
+    echo "[WARN] DOC_ROOT is required." >&2
     return 1
   fi
 
   verifier="tools/wp-baseline-verify.sh"
   if [ ! -f "$verifier" ]; then
-    log_warn "WP baseline verifier not found: ${verifier}"
+    echo "[WARN] WP baseline verifier not found: ${verifier}" >&2
     return 1
   fi
 
   DOC_ROOT="$doc_root" bash "$verifier"
-  log_info "Also check WP Admin → Tools → Site Health."
+  echo "[INFO] Also check WP Admin → Tools → Site Health."
 }
 
 detect_machine_profile() {
@@ -177,7 +167,7 @@ print_machine_profile_and_recommendation() {
   disk_display="total ${MACHINE_DISK_TOTAL} / free ${MACHINE_DISK_AVAILABLE}"
 
   echo
-  cyan "Baseline: Machine profile"
+  echo "Baseline: Machine profile"
   if [ "$HZ_LANG" = "en" ]; then
     echo "Arch: ${MACHINE_ARCH}"
     echo "vCPU: ${MACHINE_VCPU}"
@@ -192,7 +182,7 @@ print_machine_profile_and_recommendation() {
     echo "磁盘: ${disk_display}"
   fi
 
-  cyan "Recommendation"
+  echo "Recommendation"
   if [ "$HZ_LANG" = "en" ]; then
     echo "Best tier: ${MACHINE_RECOMMENDED_TIER}"
   else
@@ -268,7 +258,7 @@ baseline_diagnostics_menu() {
     while true; do
       clear
       if [ "$diag_lang" = "en" ]; then
-        cyan "Baseline Diagnostics"
+        echo "Baseline Diagnostics"
         echo "Domain: ${diag_domain:-<none>}"
         echo "Language: ${diag_lang}"
         echo "Format: ${diag_format}"
@@ -285,7 +275,7 @@ baseline_diagnostics_menu() {
         echo "  0) Back"
         read -rp "Please enter a choice: " choice
       else
-        cyan "基础诊断（Baseline Diagnostics）"
+        echo "基础诊断（Baseline Diagnostics）"
         echo "域名：${diag_domain:-<无>}"
         echo "语言：${diag_lang}"
         echo "输出格式：${diag_format}"
@@ -364,7 +354,7 @@ show_lomp_lnmp_profile_menu() {
     show_machine_profile_once
 
     if [ "$HZ_LANG" = "en" ]; then
-      cyan "LOMP/LNMP Profile Selector"
+      echo "LOMP/LNMP Profile Selector"
       echo "Select a profile (DB / Redis configuration):"
       echo "  1) LOMP-Lite (Frontend-only)"
       echo "  2) LOMP-Standard"
@@ -376,7 +366,7 @@ show_lomp_lnmp_profile_menu() {
       echo
       read -rp "Please enter a choice: " choice
     else
-      cyan "LOMP/LNMP 档位选择"
+      echo "LOMP/LNMP 档位选择"
       echo "请选择档位（DB / Redis 配置）："
       echo "  1) LOMP-Lite（Frontend-only）"
       echo "  2) LOMP-Standard"
@@ -471,7 +461,7 @@ show_lomp_lnmp_profile_menu() {
 choose_lang() {
   while true; do
     clear
-    cyan "hz-oneclick - HorizonTech Installer"
+    echo "hz-oneclick - HorizonTech Installer"
     echo
     echo "Please select language / 请选择语言："
     echo "  1) English"
@@ -508,28 +498,28 @@ main_menu() {
 
     if [ "$HZ_LANG" = "en" ]; then
       # ===== English menu =====
-      cyan  "hz-oneclick - HorizonTech Installer (preview)"
-      cyan  "Version: ${HZ_ONECLICK_VERSION} (${HZ_ONECLICK_BUILD})"
-      green "Source: ${HZ_INSTALL_BASE_URL}"
+      echo  "hz-oneclick - HorizonTech Installer (preview)"
+      echo  "Version: ${HZ_ONECLICK_VERSION} (${HZ_ONECLICK_BUILD})"
+      echo "Source: ${HZ_INSTALL_BASE_URL}"
       echo
-      cyan  "Menu options"
-      cyan  "  1) Immich on Cloud (VPS)"
-      green "  2) 🛡️ Ops & Security Center"
-      cyan  "  3) rclone basics (OneDrive etc.)"
-      green "  4) Plex Media Server"
-      cyan  "  5) Transmission (BT download)"
-      green "  6) Tailscale access"
-      cyan  "  7) Edge Tunnel / Reverse Proxy"
-      green "  8) msmtp + Brevo (SMTP alert)"
-      cyan  "  9) WP backup (DB + files)"
-      green " 10) wp-cron helper (system cron for WordPress)"
-      cyan  " 11) Verify WP baseline"
-      green " 12) rkhunter (rootkit / trojan scanner)"
-      cyan  " 13) rkhunter (daily check / optional mail alert)"
-      green " 14) Baseline Diagnostics"
-      cyan  " 15) LOMP/LNMP (DB / Redis provisioning)"
-      yellow "  0) Exit"
-      green "  r) Return to language selection / 返回语言选择 "
+      echo  "Menu options"
+      echo  "  1) Immich on Cloud (VPS)"
+      echo "  2) 🛡️ Ops & Security Center"
+      echo  "  3) rclone basics (OneDrive etc.)"
+      echo "  4) Plex Media Server"
+      echo  "  5) Transmission (BT download)"
+      echo "  6) Tailscale access"
+      echo  "  7) Edge Tunnel / Reverse Proxy"
+      echo "  8) msmtp + Brevo (SMTP alert)"
+      echo  "  9) WP backup (DB + files)"
+      echo " 10) wp-cron helper (system cron for WordPress)"
+      echo  " 11) Verify WP baseline"
+      echo " 12) rkhunter (rootkit / trojan scanner)"
+      echo  " 13) rkhunter (daily check / optional mail alert)"
+      echo " 14) Baseline Diagnostics"
+      echo  " 15) LOMP/LNMP (DB / Redis provisioning)"
+      echo "  0) Exit"
+      echo "  r) Return to language selection / 返回语言选择 "
       echo
       read -rp "Please enter a choice and press Enter: " choice
 
@@ -542,7 +532,7 @@ main_menu() {
           if declare -F show_ops_menu >/dev/null 2>&1; then
             show_ops_menu
           else
-            log_warn "Ops menu library not loaded."
+            echo "[WARN] Ops menu library not loaded." >&2
             read -rp "Press Enter to return to menu..." _
           fi
           ;;
@@ -615,28 +605,28 @@ main_menu() {
 
     else
       # ===== 中文菜单 =====
-      cyan  "hz-oneclick - HorizonTech 一键安装入口（预览版）"
-      cyan  "版本: ${HZ_ONECLICK_VERSION} (${HZ_ONECLICK_BUILD})"
-      green "来源: ${HZ_INSTALL_BASE_URL}"
+      echo  "hz-oneclick - HorizonTech 一键安装入口（预览版）"
+      echo  "版本: ${HZ_ONECLICK_VERSION} (${HZ_ONECLICK_BUILD})"
+      echo "来源: ${HZ_INSTALL_BASE_URL}"
       echo
-      cyan  "菜单选项 / Menu options"
-      cyan  "  1) Immich 上云（VPS）"
-      green "  2) 🛡️ 运维与安全中心 (Ops & Security Center)"
-      cyan  "  3) rclone 基础安装（OneDrive 等）"
-      green "  4) Plex 媒体服务器"
-      cyan  "  5) Transmission BT 下载"
-      green "  6) Tailscale 接入"
-      cyan  "  7) 反向代理/隧道穿透"
-      green "  8) 邮件报警（msmtp + Brevo）"
-      cyan  "  9) WordPress 备份（数据库 + 文件）"
-      green "  10) wp-cron 定时任务向导"
-      cyan  "  11) 验证 WordPress 基线"
-      green "  12) rkhunter（系统后门 / 木马检测）"
-      cyan  "  13) rkhunter 定时扫描(报错邮件通知 /日志维护）"
-      green "  14) 基础诊断（Baseline Diagnostics）"
-      cyan  "  15) LOMP/LNMP（DB / Redis 配置）"
-      yellow "  0) 退出"
-      yellow "  r) 返回语言选择 / Return to language selection"
+      echo  "菜单选项 / Menu options"
+      echo  "  1) Immich 上云（VPS）"
+      echo "  2) 🛡️ 运维与安全中心 (Ops & Security Center)"
+      echo  "  3) rclone 基础安装（OneDrive 等）"
+      echo "  4) Plex 媒体服务器"
+      echo  "  5) Transmission BT 下载"
+      echo "  6) Tailscale 接入"
+      echo  "  7) 反向代理/隧道穿透"
+      echo "  8) 邮件报警（msmtp + Brevo）"
+      echo  "  9) WordPress 备份（数据库 + 文件）"
+      echo "  10) wp-cron 定时任务向导"
+      echo  "  11) 验证 WordPress 基线"
+      echo "  12) rkhunter（系统后门 / 木马检测）"
+      echo  "  13) rkhunter 定时扫描(报错邮件通知 /日志维护）"
+      echo "  14) 基础诊断（Baseline Diagnostics）"
+      echo  "  15) LOMP/LNMP（DB / Redis 配置）"
+      echo "  0) 退出"
+      echo "  r) 返回语言选择 / Return to language selection"
       echo
       read -rp "请输入选项并按回车: " choice
 
@@ -649,7 +639,7 @@ main_menu() {
           if declare -F show_ops_menu >/dev/null 2>&1; then
             show_ops_menu
           else
-            log_warn "运维中心菜单未加载。"
+            echo "[WARN] 运维中心菜单未加载。" >&2
             read -rp "按回车返回菜单..." _
           fi
           ;;
