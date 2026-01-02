@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+if [ -n "${LIB_COMMON_LOADED:-}" ]; then
+  return 0
+fi
+export LIB_COMMON_LOADED=1
+
 # Unified tier identifiers for stack selection
 : "${TIER_LITE:=lite}"
 : "${TIER_STANDARD:=standard}"
