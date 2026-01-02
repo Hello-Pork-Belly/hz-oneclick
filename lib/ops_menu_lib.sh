@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
 
-ops_require_repo_root() {
-  if [ -z "${REPO_ROOT:-}" ]; then
-    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
-  fi
-
-  if [ -z "${REPO_ROOT:-}" ] || [ ! -d "${REPO_ROOT}/modules" ]; then
-    echo "[ERROR] 无法定位仓库根目录或 modules 目录不存在。"
-    return 1
-  fi
-
-  return 0
-}
+if [ -z "${REPO_ROOT:-}" ]; then
+  return 1
+fi
 
 ops_pause() {
   read -r -p "按回车继续..." _
@@ -75,19 +66,6 @@ get_rkhunter_status_tag() {
 
 show_ops_menu() {
   local choice
-  local fail2ban_path postfix_path rclone_path healthcheck_path rkhunter_path
-  local module_path
-
-  if ! ops_require_repo_root; then
-    ops_pause
-    return 1
-  fi
-
-  fail2ban_path="${REPO_ROOT}/modules/security/install-fail2ban.sh"
-  postfix_path="${REPO_ROOT}/modules/mail/setup-postfix-relay.sh"
-  rclone_path="${REPO_ROOT}/modules/backup/setup-backup-rclone.sh"
-  healthcheck_path="${REPO_ROOT}/modules/monitor/setup-healthcheck.sh"
-  rkhunter_path="${REPO_ROOT}/modules/security/install-rkhunter.sh"
 
   while true; do
     echo
@@ -102,38 +80,28 @@ show_ops_menu() {
 
     case "$choice" in
       1)
-        module_path="$fail2ban_path"
+        bash "${REPO_ROOT}/modules/security/install-fail2ban.sh"
         ;;
       2)
-        module_path="$postfix_path"
+        bash "${REPO_ROOT}/modules/mail/setup-postfix-relay.sh"
         ;;
       3)
-        module_path="$rclone_path"
+        bash "${REPO_ROOT}/modules/backup/setup-backup-rclone.sh"
         ;;
       4)
-        module_path="$healthcheck_path"
+        bash "${REPO_ROOT}/modules/monitor/setup-healthcheck.sh"
         ;;
       5)
-        module_path="$rkhunter_path"
+        bash "${REPO_ROOT}/modules/security/install-rkhunter.sh"
         ;;
       0)
         return 0
         ;;
       *)
         echo "无效选项，请重试。"
-        continue
         ;;
     esac
 
-    if [ ! -f "$module_path" ]; then
-      echo "[WARN] 模块脚本不存在：${module_path}"
-      ops_pause
-      continue
-    fi
-
-    if ! bash "$module_path"; then
-      echo "[WARN] 模块执行失败，请检查日志后重试。"
-    fi
     ops_pause
   done
 }
