@@ -1,17 +1,9 @@
 #!/usr/bin/env bash
 
-ops_require_repo_root() {
-  if [ -z "${REPO_ROOT:-}" ]; then
-    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
-  fi
-
-  if [ -z "${REPO_ROOT:-}" ] || [ ! -d "${REPO_ROOT}/modules" ]; then
-    echo "[ERROR] 无法定位仓库根目录或 modules 目录不存在。"
-    return 1
-  fi
-
-  return 0
-}
+if [ -z "${REPO_ROOT:-}" ]; then
+  echo "❌ Error: REPO_ROOT not set."
+  return 1
+fi
 
 ops_pause() {
   read -r -p "按回车继续..." _
@@ -78,9 +70,9 @@ show_ops_menu() {
   local fail2ban_path postfix_path rclone_path healthcheck_path rkhunter_path
   local module_path
 
-  if ! ops_require_repo_root; then
-    ops_pause
-    return 1
+  if ! command -v log_info >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    source "${REPO_ROOT}/lib/common.sh"
   fi
 
   fail2ban_path="${REPO_ROOT}/modules/security/install-fail2ban.sh"
@@ -126,13 +118,13 @@ show_ops_menu() {
     esac
 
     if [ ! -f "$module_path" ]; then
-      echo "[WARN] 模块脚本不存在：${module_path}"
+      log_warn "模块脚本不存在：${module_path}"
       ops_pause
       continue
     fi
 
     if ! bash "$module_path"; then
-      echo "[WARN] 模块执行失败，请检查日志后重试。"
+      log_warn "模块执行失败，请检查日志后重试。"
     fi
     ops_pause
   done
