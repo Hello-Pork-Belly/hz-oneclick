@@ -6069,7 +6069,7 @@ apply_lsphp_ini_tuning() {
       echo
       echo "$begin_marker"
       echo "upload_max_filesize = 64M"
-      echo "post_max_size = 64M"
+      echo "post_max_size = 128M"
       echo "memory_limit = 256M"
       echo "$end_marker"
     } >>"$candidate"
@@ -6258,13 +6258,8 @@ apply_wp_site_health_baseline() {
     if php_ini="$(get_lsphp_ini_path "$php_bin")" && [ -f "$php_ini" ]; then
       ini_hash_before="$(sha256sum "$php_ini" | awk '{print $1}')"
 
-      if [ "$tier" = "$TIER_LITE" ]; then
-        update_php_ini_value "$php_ini" "upload_max_filesize" "32M" || true
-        update_php_ini_value "$php_ini" "post_max_size" "64M" || true
-      else
-        update_php_ini_value "$php_ini" "upload_max_filesize" "64M" || true
-        update_php_ini_value "$php_ini" "post_max_size" "128M" || true
-      fi
+      update_php_ini_value "$php_ini" "upload_max_filesize" "64M" || true
+      update_php_ini_value "$php_ini" "post_max_size" "128M" || true
 
       ini_hash_after="$(sha256sum "$php_ini" | awk '{print $1}')"
       if [ "$ini_hash_before" != "$ini_hash_after" ]; then
@@ -8189,6 +8184,16 @@ fix_permissions() {
   find "$base" -type f -exec chmod 644 {} +
 
   ensure_uploads_fonts_dir
+  local wp_config_file="${doc_root}/wp-config.php"
+  local wp_config_owner=""
+  if [ -f "$wp_config_file" ]; then
+    wp_config_owner="$(stat -c '%U:%G' "$wp_config_file" 2>/dev/null || true)"
+    if [ "$wp_config_owner" != "nobody:nogroup" ]; then
+      chown nobody:nogroup "$wp_config_file"
+    fi
+    chmod 600 "$wp_config_file"
+    log_info "已加固 wp-config.php 权限为 600，并确保 Owner 为 nobody:nogroup。"
+  fi
 
   log_info "已将 ${base} 目录及文件权限统一为 nobody:nogroup + 755/644。"
 }
