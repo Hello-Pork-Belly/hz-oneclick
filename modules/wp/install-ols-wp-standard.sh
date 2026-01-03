@@ -6258,13 +6258,8 @@ apply_wp_site_health_baseline() {
     if php_ini="$(get_lsphp_ini_path "$php_bin")" && [ -f "$php_ini" ]; then
       ini_hash_before="$(sha256sum "$php_ini" | awk '{print $1}')"
 
-      if [ "$tier" = "$TIER_LITE" ]; then
-        update_php_ini_value "$php_ini" "upload_max_filesize" "32M" || true
-        update_php_ini_value "$php_ini" "post_max_size" "64M" || true
-      else
-        update_php_ini_value "$php_ini" "upload_max_filesize" "64M" || true
-        update_php_ini_value "$php_ini" "post_max_size" "128M" || true
-      fi
+      update_php_ini_value "$php_ini" "upload_max_filesize" "64M" || true
+      update_php_ini_value "$php_ini" "post_max_size" "128M" || true
 
       ini_hash_after="$(sha256sum "$php_ini" | awk '{print $1}')"
       if [ "$ini_hash_before" != "$ini_hash_after" ]; then
@@ -8187,6 +8182,18 @@ fix_permissions() {
   chown -R nobody:nogroup "$base"
   find "$base" -type d -exec chmod 755 {} +
   find "$base" -type f -exec chmod 644 {} +
+
+  local wp_config="${doc_root}/wp-config.php"
+  if [ -f "$wp_config" ]; then
+    local wp_config_owner
+    wp_config_owner="$(stat -c '%U' "$wp_config")"
+    if [ "$wp_config_owner" != "nobody" ]; then
+      chown nobody:nogroup "$wp_config"
+      log_info "wp-config.php owner corrected to nobody:nogroup"
+    fi
+    chmod 600 "$wp_config"
+    log_info "wp-config.php permission hardened to 600 (owner-only)"
+  fi
 
   ensure_uploads_fonts_dir
 
