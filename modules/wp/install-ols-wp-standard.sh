@@ -6069,7 +6069,7 @@ apply_lsphp_ini_tuning() {
       echo
       echo "$begin_marker"
       echo "upload_max_filesize = 64M"
-      echo "post_max_size = 64M"
+      echo "post_max_size = 128M"
       echo "memory_limit = 256M"
       echo "$end_marker"
     } >>"$candidate"
@@ -6258,13 +6258,8 @@ apply_wp_site_health_baseline() {
     if php_ini="$(get_lsphp_ini_path "$php_bin")" && [ -f "$php_ini" ]; then
       ini_hash_before="$(sha256sum "$php_ini" | awk '{print $1}')"
 
-      if [ "$tier" = "$TIER_LITE" ]; then
-        update_php_ini_value "$php_ini" "upload_max_filesize" "32M" || true
-        update_php_ini_value "$php_ini" "post_max_size" "64M" || true
-      else
-        update_php_ini_value "$php_ini" "upload_max_filesize" "64M" || true
-        update_php_ini_value "$php_ini" "post_max_size" "128M" || true
-      fi
+      update_php_ini_value "$php_ini" "upload_max_filesize" "64M" || true
+      update_php_ini_value "$php_ini" "post_max_size" "128M" || true
 
       ini_hash_after="$(sha256sum "$php_ini" | awk '{print $1}')"
       if [ "$ini_hash_before" != "$ini_hash_after" ]; then
@@ -8187,6 +8182,19 @@ fix_permissions() {
   chown -R nobody:nogroup "$base"
   find "$base" -type d -exec chmod 755 {} +
   find "$base" -type f -exec chmod 644 {} +
+
+  # [Security] Hardening wp-config.php (Baseline v2.2.0)
+  if [ -n "${doc_root:-}" ] && [ -f "${doc_root}/wp-config.php" ]; then
+    # Guardrail: ensure owner is web user (defensive)
+    local _cfg="${doc_root}/wp-config.php"
+    local _owner
+    _owner="$(stat -c '%U' "$_cfg" 2>/dev/null || echo '')"
+    if [ -z "$_owner" ] || [ "$_owner" != "nobody" ]; then
+      chown nobody:nogroup "$_cfg" || true
+    fi
+    chmod 600 "$_cfg" || true
+    log_info "已加固 wp-config.php 权限为 600 (Owner only)。"
+  fi
 
   ensure_uploads_fonts_dir
 
